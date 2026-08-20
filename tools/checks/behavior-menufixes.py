@@ -61,9 +61,12 @@ class FakeAirborneController:
         self.calls.append("GetPlayerViewportClient")
         return self._viewport
 
-    def CanShowModalMenu(self):
+    def CanShowModalMenu(self, display_failure_warning):
+        # The REAL call demands this flag and answers with a (verdict, warning) pair -
+        # measured live 2026-08-20, and the day the fake accepted a bare call was the day
+        # this whole file passed while every real inventory in the game refused to open.
         self.calls.append("CanShowModalMenu")
-        return self._can_show
+        return (self._can_show, 0)
 
     def ForceUnzoom(self):
         self.calls.append("ForceUnzoom")
@@ -155,6 +158,27 @@ try:
         f"returned {real_off_result!r}",
     )
 
+    # The real engine call, asked for real, read-only: it must demand the flag (a bare call
+    # raises) and answer with a pair. These two anchors are what keep the fakes honest - the
+    # first version of this file faked a bare bool and passed while the live game had no
+    # inventory at all.
+    try:
+        p.CanShowModalMenu()
+        bare_raised = False
+    except TypeError:
+        bare_raised = True
+    check(
+        "the real 'may a menu open' call demands the warning flag - a bare call raises",
+        bare_raised,
+        "TypeError raised" if bare_raised else "a bare call was accepted, the fakes are wrong",
+    )
+    real_answer = p.CanShowModalMenu(False)
+    check(
+        "and answers with the verdict and the warning as a pair",
+        isinstance(real_answer, tuple) and len(real_answer) >= 1,
+        f"{real_answer!r}",
+    )
+
     MF.menu_in_air.value = True
     fake = FakeAirborneController()
     fake_result = MF.on_show_status_menu.__wrapped__(fake, status_args, None, None)
@@ -185,15 +209,15 @@ try:
         f"ran_for = {fake._viewport.ViewportUI.ran_for!r}",
     )
 
-    # CanShowModalMenu() saying no must still block the vanilla function (matching the legacy
-    # mechanism, which always returns False once the switch is on) - but must do none of the
-    # rest of the work.
+    # CanShowModalMenu saying no now hands the click BACK to the game (None), so the game
+    # refuses with its own warning - a deliberate change from the legacy always-block, made
+    # when blocking on every failure path turned one bad call into "no inventory at all".
     refused = FakeAirborneController(can_show=False)
     refused_result = MF.on_show_status_menu.__wrapped__(refused, status_args, None, None)
     check(
-        "when the game says no other menu can show right now, the hook still blocks the "
-        "vanilla function rather than letting it refuse a second time",
-        refused_result is Block,
+        "when the game says no menu can show right now, the hook hands the click back to the "
+        "game so it can refuse with its own warning",
+        refused_result is None,
         f"returned {refused_result!r}",
     )
     check(
@@ -211,24 +235,27 @@ try:
         f"returned {no_trade_result!r}, status_menu_open={no_trade.status_menu_open!r}",
     )
 
-    # No viewport at all: CanShowModalMenu() must never even be asked, matching the legacy
-    # `if viewportClient and caller.CanShowModalMenu():` short-circuit order.
+    # No viewport at all: CanShowModalMenu must never even be asked (legacy short-circuit
+    # order), and the click goes back to the game rather than dying in the dark.
     no_viewport = FakeAirborneController(has_viewport=False)
     no_viewport_result = MF.on_show_status_menu.__wrapped__(no_viewport, status_args, None, None)
     check(
-        "with no viewport at all, the menu-opening work is skipped without being asked whether "
-        "a modal menu can show",
-        no_viewport_result is Block and no_viewport.calls == ["GetPlayerViewportClient"],
+        "with no viewport at all, the click is handed back to the game without being asked "
+        "whether a modal menu can show",
+        no_viewport_result is None and no_viewport.calls == ["GetPlayerViewportClient"],
         f"returned {no_viewport_result!r}, calls were {no_viewport.calls}",
     )
 
-    # A viewport lookup that raises must be swallowed, not crash the pack.
+    # A raise partway through must FAIL OPEN: contained, logged, and the vanilla menu code
+    # gets the click. The first version blocked here, and one bad call became "no inventory
+    # at all, any character, keyboard and controller" - the outage of 2026-08-20.
     angry = AngryController()
     angry_result = MF.on_show_status_menu.__wrapped__(angry, status_args, None, None)
     check(
-        "a viewport lookup that raises is contained, so one bad frame cannot take the pack down",
-        angry_result is Block,
-        f"returned {angry_result!r}",
+        "a raise partway through is contained AND the click still reaches the game's own "
+        "menu code",
+        angry_result is None,
+        f"returned {angry_result!r} - Block here means a bug eats every inventory click",
     )
 
 finally:
