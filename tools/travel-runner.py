@@ -88,8 +88,10 @@ CHOREOGRAPHY: list[tuple[str, list[tuple]]] = [
                  "_trav_V.reach.value = _trav_prev_reach"),
     ]),
     ("co-op-and-handshake-needs-travel.py", [
-        # Run 1 arms, the map must change, run 2 reads and restores.
-        ("harness",), ("run", 60), ("sleep", 3), ("travel", "TundraExpress"), ("wait",),
+        # Run 1 arms, the map must CHANGE, run 2 reads and restores. IceEast rather than
+        # Tundra because other files in this list end at Tundra, and travelling to the map
+        # you are already in changes nothing and proves nothing.
+        ("harness",), ("run", 60), ("sleep", 3), ("travel", "IceEast"), ("wait",),
         ("run", 90),
     ]),
     ("community-patch-needs-travel.py", [

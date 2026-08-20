@@ -406,6 +406,12 @@ try:
     # A DIFFERENT controller is a different character: quitting to the menu and joining
     # somebody's game. This is the exact moment the check exists for, and a flag latched for
     # the life of the process used to make it send nothing at all.
+    #
+    # The latch is a TIME WINDOW now (2026-08-20): one announce per arrival, where duplicate
+    # hook fires inside a few seconds are one arrival. Two real character loads are minutes
+    # apart; this simulation is milliseconds apart, so the window must be aged past by hand -
+    # the same lever the forced-announce above already uses.
+    H._announced = False
     H.announce_on_spawn(FakeController(), None, None, None)
     check(
         "a later character load - quitting to the menu and joining a co-op game - announces again",

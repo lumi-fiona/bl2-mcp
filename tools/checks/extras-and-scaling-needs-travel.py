@@ -179,7 +179,11 @@ def _sample(label):
 _TEXT = (pathlib.Path(core.__file__).parent / "data" / "extras.txt").read_text(
     encoding="utf-8", errors="replace",
 )
-_, _HOT, _ = commands_from(_TEXT, E.wanted_sections())
+# Only the Text Fixes section, and only if it is switched on. ice_p also holds two
+# DLC-scaling numbers whose objects do not even exist on this map, and reading those back is
+# not what this claim is about - measured 2026-08-20: the count read "3 of 5" with two
+# '5.0's, while all three actual text fixes were holding fine.
+_, _HOT, _ = commands_from(_TEXT, [s for s in E.wanted_sections() if s == "Text Fixes"])
 ICE_COMMANDS = [c for lvl, c in _HOT if lvl.lower() == "ice_p"]
 
 

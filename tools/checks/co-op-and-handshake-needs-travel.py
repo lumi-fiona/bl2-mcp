@@ -88,9 +88,13 @@ elif STATE not in globals():
         "mine": (H.__version__, H.patch_fingerprint()),
     }
 
-    def record_sent(version, fingerprint, _state=state):
+    # The third argument arrived when announce grew its mods report (2026-08-20). A two-arg
+    # spy raised TypeError on every arrival announce, the raise was swallowed by the map
+    # watcher's callback guard, and this file then blamed the latch - the recorder must
+    # always match the real signature, defaults included.
+    def record_sent(version, fingerprint, mods=None, _state=state):
         _state["sent"].append((version, fingerprint))
-        return _state["real_announce"](version, fingerprint)
+        return _state["real_announce"](version, fingerprint, mods)
 
     def record_received(sender, message, _state=state):
         _state["received"].append((str(sender), message))
