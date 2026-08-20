@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+tools/checks/RESULTS.txt
+tools/checks/TRAVEL-RESULTS.txt

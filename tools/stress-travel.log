@@ -1,0 +1,43 @@
+=== travel stress, Thu Aug 20 06:44:49 WEDT 2026 ===
+dxvk: d3d9.maxAvailableMemory = 2048 d3d9.memoryTrackTest = True 
+pool: PoolSize=512
+
+round  map          arrived  virtMB  workMB
+    1  Sanctuary    yes        2966    1701
+    1  Interlude    yes        2985    1752
+    1  Lynchwood    yes        3080    1842
+    1  Outwash      yes        3106    1865
+    1  Ash          yes        3273    1962
+    1  Sanctuary    yes        3233    1934
+    2  Sanctuary    yes        3247    1948
+    2  Interlude    yes        3238    1957
+    2  Lynchwood    yes        3237    1955
+    2  Outwash      yes        3213    1929
+    2  Ash          yes        3239    1959
+    2  Sanctuary    yes        3230    1947
+    3  Sanctuary    yes        3254    1973
+    3  Interlude    yes        3229    1950
+    3  Lynchwood    yes        3233    1955
+    3  Outwash      yes        3215    1935
+    3  Ash          yes        3241    1965
+    3  Sanctuary    yes        3238    1954
+    4  Sanctuary    yes        3254    1969
+    4  Interlude    yes        3275    1975
+    4  Lynchwood    yes        3260    1961
+    4  Outwash      yes        3237    1937
+    4  Ash          yes        3264    1968
+    4  Sanctuary    yes        3260    1962
+    5  Sanctuary    yes        3273    1974
+    5  Interlude    yes        3264    1968
+    5  Lynchwood    yes        3255    1959
+    5  Outwash      yes        3219    1923
+    5  Ash          yes        3275    1977
+    5  Sanctuary    yes        3267    1953
+    6  Sanctuary    yes        3282    1984
+    6  Interlude    yes        3284    1990
+    6  Lynchwood    yes        3297    2000
+    6  Outwash      yes        3254    1942
+    6  Ash          yes        3286    1980
+    6  Sanctuary    yes        3253    1947
+
+survived 36 map changes

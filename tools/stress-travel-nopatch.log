@@ -1,0 +1,15 @@
+=== travel stress, Wed Aug 19 15:41:57 WEDT 2026 ===
+dxvk: d3d9.maxAvailableMemory = 2048 d3d9.memoryTrackTest = True 
+pool: PoolSize=160
+
+round  map          arrived  virtMB  workMB
+    1  Sanctuary    no         2697    1448
+    1  Interlude    yes        2918    1666
+    1  Lynchwood    yes        3054    1782
+    1  Outwash      yes        3216    1839
+    1  Ash          yes        3370    2000
+    1  Sanctuary    yes        3400    2052
+    2  Sanctuary    yes        3430    2064
+    2  Interlude    yes        3440    2063
+    2  Lynchwood    *** RAN OUT OF VIDEO MEMORY - jump number 9 ***
+last known: 3900 2525

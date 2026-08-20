@@ -1,0 +1,8 @@
+=== travel stress, Wed Aug 19 15:31:14 WEDT 2026 ===
+dxvk: d3d9.maxAvailableMemory = 1024 d3d9.memoryTrackTest = True d3d9.textureMemory = 32 
+pool: PoolSize=160
+
+round  map          arrived  virtMB  workMB
+    1  Sanctuary    no         2706    1432
+    1  Interlude    *** RAN OUT OF VIDEO MEMORY - jump number 2 ***
+last known: 4025 2782
