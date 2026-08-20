@@ -62,7 +62,7 @@ def main():
 
     text = extras_txt.read_text(encoding="utf-8")
     found = patchfile.sections_in(text)
-    wanted = [section for _file, section, _what in build_extras.SOURCES]
+    wanted = [section for _file, section, _what, _default in build_extras.SOURCES]
 
     # Claim 1. This is the assert patchsections.py:136-137 already makes for the Community
     # Patch and that nothing has ever made for extras.txt.
@@ -100,6 +100,26 @@ def main():
         f"{len(hotfixes)} hotfixes ({len(gated)} map-gated across {len(set(gated))} maps) = "
         f"{len(commands) + len(hotfixes)}, against sections_in's {sum(found.values())} total; "
         f"{ignored} lines ignored",
+    )
+
+    # Added 2026-08-20 with the fourth SOURCES field (whether a section starts ticked).
+    # features/extras.py builds its switches with `for _file, section, what, default in SOURCES`
+    # at import time, so an entry left at three fields does not misbehave later - it raises
+    # ValueError while the module is loading and the whole Extras feature never registers. Not
+    # a frozen number: it re-reads SOURCES and only asks that every row still has a shape the
+    # menu can unpack.
+    malformed = [
+        entry[1] if len(entry) > 1 else repr(entry)
+        for entry in build_extras.SOURCES
+        if len(entry) != 4 or not isinstance(entry[3], bool)
+    ]
+    check(
+        "every SOURCES entry carries a name and an on/off default the menu can unpack",
+        not malformed,
+        f"{len(build_extras.SOURCES)} entries, "
+        f"{sum(1 for e in build_extras.SOURCES if e[3] is False)} of them shipping switched off"
+        if not malformed
+        else f"entries the switch builder would choke on: {malformed}",
     )
 
     # Claim 2, FIXED 2026-08-20. build_extras.build() used to print a warning and carry on
