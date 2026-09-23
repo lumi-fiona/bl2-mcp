@@ -128,18 +128,37 @@ def main():
         f"{len([c for _, c in hotfixes if target in c])} of them touching {target}",
     )
 
-    # --- ticket 21: Nifsara's slag against the bundled Community Patch -----------------
+    # --- tickets 21 and 27: Nifsara's slag against the bundled Community Patch ----------
     # The whole file, sections switched off and hotfixes included, in both the set form and
     # the hotfix form - so a patch section turned on later cannot start fighting the switch.
+    # Every line of his section, the class-loaded ones (turret, Deathtrap, Double Up) included.
+    slag_lines = dm.SLAG_SECOND_WIND + dm.SLAG_CLASS_SECOND_WIND
     slag_hits = []
-    for command in dm.SLAG_SECOND_WIND:
+    for command in slag_lines:
         obj, prop = command.split(" ")[1:3]
         slag_hits += [form for form in (f"{obj} {prop}", f"{obj},{prop},") if form in text]
     check(
         "nothing in the Community Patch writes what the Second Wind slag switch writes",
-        not slag_hits,
+        not slag_hits and len(slag_lines) == 15,
         f"collisions: {slag_hits}" if slag_hits else
-        f"none of {[' '.join(c.split(' ')[1:3]) for c in dm.SLAG_SECOND_WIND]} appears anywhere in the patch",
+        f"none of the {len(slag_lines)} properties {[' '.join(c.split(' ')[1:3]) for c in slag_lines]} "
+        f"appears anywhere in the patch",
+    )
+    # The same objects written for other properties are not collisions, but they are named, so a
+    # new one shows up here rather than nowhere.
+    shared = sorted({
+        f"{obj} {prop}"
+        for obj in {c.split(" ")[1] for c in slag_lines}
+        for prop in re.findall(rf"set {re.escape(obj)} (\w+)", text)
+    })
+    check(
+        "the patch writes the slag objects only for their colours and Double Up's effects",
+        shared == [
+            "GD_Amp.DamageType.DmgType_Amp_Impact DamageColor",
+            "GD_Amp.DamageType.DmgType_Amp_Status DamageColor",
+            "GD_Soldier_Skills.Guerrilla.DoubleUp SkillEffectDefinitions",
+        ],
+        f"the patch also writes {shared}",
     )
 
     if writes:
@@ -178,10 +197,12 @@ def main():
     # (features/difficulty.py:192-194).
     saved = json.loads(SETTINGS.read_text(encoding="utf-8"))["options"]["Difficulty presets"]
     known = [*dm.CHOICES, "Custom"]
+    # Absent is fine since ticket 27: the preset is per character, and it is written out only for
+    # a character that chose, so a settings save while one that never chose is loaded leaves it out.
     check(
-        "the preset saved in the machine-wide settings file is one this build can build",
-        saved.get("Difficulty preset") in known,
-        f"settings file says {saved.get('Difficulty preset')!r}, this build knows {known}",
+        "the preset saved in the machine-wide settings file is one this build can build, or none",
+        saved.get("Difficulty preset", "Normal") in known,
+        f"settings file says {saved.get('Difficulty preset', '(nothing)')!r}, this build knows {known}",
     )
 
     # A renamed option identifier drops the saved value on the floor without a word, so

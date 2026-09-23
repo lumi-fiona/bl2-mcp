@@ -109,15 +109,30 @@ def _d_plain(v):
 
 
 def _d_slag():
-    """Everything the slag switch writes, as plain values."""
+    """Everything the slag switch writes, as plain values - the class-loaded objects when loaded."""
     skill = unrealsdk.find_object("SkillDefinition", DN.SLAG_SKILL)
     status = unrealsdk.find_object("StatusEffectDefinition", DN.SLAG_STATUS)
     card = unrealsdk.find_object("AttributePresentationDefinition", DN.SLAG_CARD)
-    return {
+    out = {
         "effects": _d_plain(skill.SkillEffectDefinitions),
         "duration": _d_plain(status.BaseDuration),
         "card": str(card.Description),
+        "chances": _d_plain(status.DamageSurfaceChanceModifiers),
     }
+    for name, path in (("impact", DN._IMPACT), ("over time", DN._OVER_TIME)):
+        o = unrealsdk.find_object("WillowDamageTypeDefinition", path)
+        out[name] = [_d_plain(getattr(o, f"{s}DamageModifier")) for s in DN._SURFACES]
+    for name, cls, path, props in (
+        ("turret", "AIClassDefinition", DN._TURRET, ("BaseAmpChanceResistanceModifier", "BaseAmpDurationResistanceModifier")),
+        ("deathtrap", "AIClassDefinition", DN._DEATHTRAP, ("BaseAmpChanceResistanceModifier", "BaseAmpDurationResistanceModifier")),
+        ("double up", "SkillDefinition", DN._DOUBLE_UP, ("SkillDescription",)),
+    ):
+        try:
+            o = unrealsdk.find_object(cls, path)
+        except Exception:  # noqa: BLE001 - not this character's class
+            continue
+        out[name] = [_d_plain(getattr(o, p)) for p in props]
+    return out
 
 
 def _d_split(text, top_level_items):
@@ -212,7 +227,8 @@ def _d_main():
     snap_slag_time = _d_slag_time(obj)
     snap_slag_state = D._slag_state()
     snap_memories = [(m, type(m)(m)) for m in (D._healing_original, D._dot_original, D._slag_time_original, D._table_original)]
-    snap_flags = {"_new_character": D._new_character, "PER_CHARACTER": D.PER_CHARACTER}
+    snap_flags = {"_new_character": D._new_character, "PER_CHARACTER": D.PER_CHARACTER,
+                  "_class_slag_written": D._class_slag_written, "_preset_in_save": D._preset_in_save}
     snap_chosen_by = dict(D.chosen_by_character.value)
     # mode_chosen first: putting it back before the preset keeps the preset's own change
     # callback (gated on it) from rewriting the table on the way out.
@@ -284,15 +300,21 @@ def _d_main():
         want = dict(zip(
             ("EnemyHealthMultiplier", "BadassEnemyHealthMultiplier", "EnemyShieldStrengthMultiplier",
              "BadassEnemyShieldStrengthMultiplier", "EnemyDamageMultiplier", "XPGainedFromCombatMultiplier",
-             "BadassEnemyDamageMultiplier", "XPGainedFromQuestsMultiplier", "AmplifiedDamageMultiplier"),
-            (1.0, 1.25, 1.0, 1.75, 0.6686, 0.6, 0.6148, 0.66, 1.0),
+             "BadassEnemyDamageMultiplier", "XPGainedFromQuestsMultiplier", "AmplifiedDamageMultiplier",
+             "PlayerVehicleWeaponDamageMultiplier"),
+            (1.0, 1.25, 1.0, 1.75, 0.6686, 0.66, 0.6148, 0.66, 1.0, 1.25),
         ))
         off = {f: _d_col(rows, f) for f, v in want.items() if not _d_all(rows, f, v)}
         check(
-            "Second Wind writes 1.5/2.5/1.5/3.5/1.08/0.66 of Normal divided by playthrough 2's own "
-            "1.5/2.0/1.5/2.0/1.62/1.1, and slag at 1.0, on every tier",
+            "Second Wind writes 1.5/2.5/1.5/3.5/1.08/0.726 of Normal divided by playthrough 2's own "
+            "1.5/2.0/1.5/2.0/1.62/1.1, vehicle guns at 1.25 and slag at 1.0, on every tier",
             not off,
             f"off target: {off}" if off else f"{len(rows)} tiers: {want}",
+        )
+        check(
+            "UVHM keeps its own x3 vehicle guns",
+            _d_all(uvhm_rows, "PlayerVehicleWeaponDamageMultiplier", 3.0),
+            f"UVHM vehicle guns {_d_col(uvhm_rows, 'PlayerVehicleWeaponDamageMultiplier')}",
         )
         check(
             "the two presets leave the object holding different numbers, so they can be told apart by playing",
@@ -306,16 +328,40 @@ def _d_main():
         check(
             "Second Wind puts Nifsara's slag in: no damage bonus, half speed, slower shots, 5 seconds",
             D._slag_state() == "second wind"
-            and len(sw_slag["effects"]) == 4
+            and len(sw_slag["effects"]) == 6
             and [e["BaseModifierValue"]["BaseValueScaleConstant"] for e in sw_slag["effects"][:2]] == [0.0, 0.0]
             and sw_slag["effects"][2]["AttributeToModify"].endswith("FootSpeed")
             and sw_slag["effects"][2]["BaseModifierValue"]["BaseValueConstant"] == -1.0
             and sw_slag["effects"][3]["AttributeToModify"].endswith("WeaponFireInterval")
             and _d_near(sw_slag["effects"][3]["BaseModifierValue"]["BaseValueConstant"], 0.5)
+            and all(e["BaseModifierValue"]["BaseValueConstant"] == 0.0 for e in sw_slag["effects"][4:])
             and sw_slag["duration"]["BaseValueConstant"] == 5.0
             and "half speed" in sw_slag["card"],
             f"state {D._slag_state()}, {len(sw_slag['effects'])} effects, duration {sw_slag['duration']}, "
             f"card {sw_slag['card']!r}",
+        )
+        # The rest of his section (ticket 27): half the chance on every surface, slag guns weaker on
+        # shields through the playthrough's resistance, and no damage over time.
+        chances = [(getattr(r["SurfaceType"], "name", r["SurfaceType"]), r["BaseChance"]["BaseValueConstant"])
+                   for r in sw_slag["chances"]]
+        shield = sw_slag["impact"][2]
+        check(
+            "Second Wind halves slag's chance to stick, weakens slag guns on shields and takes away slag's damage over time",
+            [c for _, c in chances] == [15.0] * 4
+            and all(str(v["InitializationDefinition"]).endswith("Init_NormalElementResistMultiplier_ByPlaythrough")
+                    for v in sw_slag["impact"][:2])
+            and str(shield["InitializationDefinition"]).endswith("Init_HighElementResistMultiplier_ByPlaythrough")
+            and _d_near(shield["BaseValueScaleConstant"], 0.75)
+            and all(v["BaseValueScaleConstant"] == 0.0 and v["BaseValueConstant"] == 0.0 for v in sw_slag["over time"]),
+            f"chances {chances}, shield {shield}, over time scales {[v['BaseValueScaleConstant'] for v in sw_slag['over time']]}",
+        )
+        loaded = [k for k in ("turret", "deathtrap", "double up") if k in sw_slag]
+        check(
+            "Second Wind makes the turret and Deathtrap unslaggable and says so in Double Up, for whichever is loaded",
+            all(v["BaseValueConstant"] == 0.0 for k in ("turret", "deathtrap") if k in sw_slag for v in sw_slag[k])
+            and ("double up" not in sw_slag or "half speed" in sw_slag["double up"][0]),
+            f"loaded here: {loaded or 'none (not Axton or Gaige)'}; "
+            f"{ {k: sw_slag[k] for k in loaded} }",
         )
         dot_sw = _d_dot(obj)
         check(
@@ -414,7 +460,18 @@ def _d_main():
         check(
             "choosing Normal puts the game's own slag back, value for value",
             D._slag_state() == "game" and (snap_slag_state != "game" or _d_slag() == _d_slag_before),
-            f"state {D._slag_state()}, card {_d_slag()['card']!r}",
+            f"state {D._slag_state()}, card {_d_slag()['card']!r}"
+            + ("" if snap_slag_state == "game" else " (value for value only on a character that started on the game's slag)"),
+        )
+        after = _d_slag()
+        game_double_up = DN.SLAG_CLASS_GAME[-1].split(" SkillDescription ", 1)[1]
+        check(
+            "choosing Normal gives the turret, Deathtrap and Double Up the game's own values back",
+            all(v["BaseValueConstant"] == 1.0 for k in ("turret", "deathtrap") if k in after for v in after[k])
+            and ("double up" not in after or after["double up"][0] == game_double_up)
+            and [(str(r["SurfaceType"]).split(".")[-1], r["BaseChance"]["BaseValueConstant"]) for r in after["chances"]][0][1] == 30.0,
+            f"loaded: {[k for k in ('turret', 'deathtrap', 'double up') if k in after] or 'none'}; "
+            f"{ {k: after[k] for k in ('turret', 'deathtrap', 'double up') if k in after} }",
         )
 
         # --- claim 8: a mode this build cannot build writes nothing -------------------
@@ -518,6 +575,48 @@ def _d_main():
             "answering the picker, even with Normal, records that this character has chosen",
             D.mode_chosen.value is True and D._has_chosen(),
             f"mode_chosen={D.mode_chosen.value!r} after picking Normal",
+        )
+
+        # --- ticket 27: a character the question never reached can still choose ------------
+        mine = next((f for f in core._features if f.name == "Difficulty presets"), None)
+        check(
+            "the mod options carry a button that asks this character's mode",
+            mine is not None and any(o is D.ask_now for o in mine.options) and D.ask_now.on_press is not None,
+            f"options {[o.identifier for o in (mine.options if mine else [])]}",
+        )
+        boxes_btn = record(D)
+        applied_btn = []
+        D._switch_to_uvhm = lambda _pc: True
+        D._apply = lambda chosen, quiet=False: applied_btn.append((chosen, quiet))
+        try:
+            D.mode_chosen.value = False
+            D.preset.value = "Normal"
+            D.ask_now.on_press(D.ask_now)
+            first = boxes_btn[-1] if boxes_btn else None
+            if first is not None:
+                cancel(first)
+            after_cancel = (D.mode_chosen.value, D.preset.value, list(applied_btn))
+            D.ask_now.on_press(D.ask_now)
+            btn = boxes_btn[-1] if len(boxes_btn) == 2 else None
+            cancellable = btn is not None and btn.kw.get("prevent_cancelling") is False
+            names = btn.names() if btn else None
+            if btn is not None:
+                pick(btn, "Second Wind")
+        finally:
+            D._switch_to_uvhm = real_switch
+            D._apply = real_apply
+        check(
+            "backing out of that button's box changes nothing",
+            first is not None and first.kw.get("prevent_cancelling") is False and after_cancel == (False, "Normal", []),
+            f"after Escape: chosen, preset, applied = {after_cancel}",
+        )
+        check(
+            "a character that never chose can pick Second Wind from that button",
+            btn is not None and cancellable and names == ["Normal", "UVHM", "Second Wind"]
+            and D.mode_chosen.value is True and D.preset.value == "Second Wind"
+            and ("Second Wind", False) in applied_btn,
+            f"{len(boxes_btn)} boxes, cancellable={cancellable}, buttons {names}, chosen={D.mode_chosen.value}, "
+            f"preset {D.preset.value!r}, applied {applied_btn}",
         )
         D._new_character = True
         D.on_main_menu(None, None, None, None)
@@ -812,6 +911,53 @@ def _d_main():
             f"never chose -> {unset!r}, chose -> {D.mode_chosen._to_json()!r}",
         )
 
+        # --- ticket 27: an old save gets back exactly what it carried ------------------------
+        D.mode_chosen.value = False
+        D.preset.value = "Normal"  # what save_options' reset does at every character load
+        no_key = D.preset._to_json()
+        old_way = super(D._Preset, D.preset)._to_json()  # what the spinner on its own writes
+        D.preset._from_json("Second Wind")  # a leftover, as the level-51 Zer0's save carries
+        leftover = D.preset._to_json()
+        D.preset._from_json("Off")  # one this build cannot even show, as an August save carries
+        stale = D.preset._to_json()
+        D.mode_chosen.value = True
+        D.preset.value = "UVHM"
+        chose = D.preset._to_json()
+        check(
+            "a character that never chose gets no preset written either, and a leftover goes back unchanged",
+            no_key is ... and leftover == "Second Wind" and stale == "Off" and chose == "UVHM",
+            f"no key -> {no_key!r}, leftover -> {leftover!r}, unshowable leftover -> {stale!r}, "
+            f"chose UVHM -> {chose!r}",
+        )
+        check(
+            "that check can fail: the spinner on its own writes a preset for every character",
+            old_way == "Normal",
+            f"the plain spinner writes {old_way!r} for a character that never chose",
+        )
+
+        # --- ticket 27: slag objects that are not loaded are nothing to report ---------------
+        errors = []
+        real_find, real_error = unrealsdk.find_object, D.logging.error
+
+        def _d_missing(cls, path):
+            if path in (DN.SLAG_SKILL, DN.SLAG_STATUS):
+                raise ValueError(f"Couldn't find object '{path}'")
+            return real_find(cls, path)
+
+        try:
+            unrealsdk.find_object = _d_missing
+            D.logging.error = lambda msg, *_a, **_k: errors.append(msg)
+            absent = D._slag_state()
+            D._set_slag(second_wind=False)
+        finally:
+            unrealsdk.find_object = real_find
+            D.logging.error = real_error
+        check(
+            "slag objects that are not loaded read as absent and put nothing in the log",
+            absent == "absent" and not errors,
+            f"state {absent!r}, errors {errors}",
+        )
+
     finally:
         # Order matters. Putting an option back fires its on_change, which writes the
         # table, so the table and the healing rates go back LAST. Each step is guarded on
@@ -839,6 +985,9 @@ def _d_main():
             D._set_slag(second_wind=snap_slag_state == "second wind")
         except Exception as ex:  # noqa: BLE001
             print(f"could not put slag back: {ex!r}")
+        # After the options: putting the preset back forgets what the save carried.
+        D._class_slag_written = snap_flags["_class_slag_written"]
+        D._preset_in_save = snap_flags["_preset_in_save"]
         for put, values, name in ((("AttributeEffectsForSpawnedEnemies", D.HEALING_ATTR), snap_heal, "healing"),
                                   (("AttributeEffectsForPlayers", D.DOT_ATTR), snap_dot, "player DoT"),
                                   (("AttributeEffectsForSpawnedEnemies", D.SLAG_TIME_ATTR), snap_slag_time, "slag time")):
