@@ -37,7 +37,7 @@ def sidecar_dir():
     )
     if module is not None:
         return Path(module._SAVES_DIR)
-    return Path(r"D:/SteamLibrary/steamapps/common/Borderlands 2/sdk_mods/SanitySaver/Saves")
+    return Path(r"Z:/SteamLibrary/steamapps/common/Borderlands 2/sdk_mods/SanitySaver/Saves")
 
 
 def save_dir():

@@ -23,7 +23,7 @@ None of that is in any wiki.
 
 REGISTER IT with Claude Code:
 
-    claude mcp add bl2 -- python "D:/SteamLibrary/steamapps/common/Borderlands 2/bl2-mcp/server.py"
+    claude mcp add bl2 -- python "Z:/SteamLibrary/steamapps/common/Borderlands 2/bl2-mcp/server.py"
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-GAME = Path(r"D:/SteamLibrary/steamapps/common/Borderlands 2")
+GAME = Path(r"Z:/SteamLibrary/steamapps/common/Borderlands 2")
 EXE = GAME / "Binaries" / "Win32" / "Borderlands2.exe"
 LOG = GAME / "Binaries" / "Win32" / "Plugins" / "unrealsdk.log"
 BRIDGE = GAME / "sdk_mods" / "bl2_modern" / "data" / "bridge"

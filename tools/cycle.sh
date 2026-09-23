@@ -21,7 +21,7 @@
 #         cycle.sh --menu     launch and stop at the main menu
 
 set -u
-GAME="D:/SteamLibrary/steamapps/common/Borderlands 2"
+GAME="Z:/SteamLibrary/steamapps/common/Borderlands 2"
 EXE_DIR="$GAME/Binaries/Win32"
 B="$GAME/sdk_mods/bl2_modern/data/bridge"
 TOOLS="$GAME/bl2-mcp/tools"

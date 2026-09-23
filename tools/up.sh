@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch Borderlands 2 and leave it running, past the press-any-key screen.
-GAME="D:/SteamLibrary/steamapps/common/Borderlands 2"
+GAME="Z:/SteamLibrary/steamapps/common/Borderlands 2"
 LOG="$GAME/Binaries/Win32/Plugins/unrealsdk.log"
 taskkill //F //IM Borderlands2.exe >/dev/null 2>&1; sleep 2; rm -f "$LOG"
 cd "$GAME/Binaries/Win32" || exit 1

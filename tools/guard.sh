@@ -16,7 +16,7 @@
 # and a guard nobody can distinguish from a no-op is worse than none, because it is trusted.
 
 set -u
-GAME="D:/SteamLibrary/steamapps/common/Borderlands 2"
+GAME="Z:/SteamLibrary/steamapps/common/Borderlands 2"
 TOOLS="$GAME/bl2-mcp/tools"
 SAVES="/c/Users/Lumi/Documents/My Games/Borderlands 2/WillowGame/SaveData/76561198860136601"
 STAMP=$(date +%Y%m%d-%H%M%S)

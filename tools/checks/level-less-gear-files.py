@@ -15,7 +15,7 @@ import json
 import re
 from pathlib import Path
 
-GAME = Path(r"D:/SteamLibrary/steamapps/common/Borderlands 2")
+GAME = Path(r"Z:/SteamLibrary/steamapps/common/Borderlands 2")
 SETTINGS = GAME / "sdk_mods" / "settings" / "bl2_modern.json"
 LEVELLESS = GAME / "sdk_mods" / "bl2_modern" / "features" / "levelless.py"
 SAVE_OPTIONS = GAME / "sdk_mods" / "save_options.sdkmod"

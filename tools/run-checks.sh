@@ -9,7 +9,7 @@
 # and named at the end, because they need map changes driven from outside a request.
 
 set -u
-GAME="D:/SteamLibrary/steamapps/common/Borderlands 2"
+GAME="Z:/SteamLibrary/steamapps/common/Borderlands 2"
 TOOLS="$GAME/bl2-mcp/tools"
 CHECKS="$TOOLS/checks"
 FILTER="${1:-}"

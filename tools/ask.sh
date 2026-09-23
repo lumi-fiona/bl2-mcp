@@ -17,7 +17,7 @@
 #
 # ASK_TIMEOUT=<seconds> overrides the default wait. Loads want 90 or more.
 
-B="D:/SteamLibrary/steamapps/common/Borderlands 2/sdk_mods/bl2_modern/data/bridge"
+B="Z:/SteamLibrary/steamapps/common/Borderlands 2/sdk_mods/bl2_modern/data/bridge"
 TIMEOUT="${ASK_TIMEOUT:-40}"
 ID="ask-$$-${RANDOM}${RANDOM}"
 

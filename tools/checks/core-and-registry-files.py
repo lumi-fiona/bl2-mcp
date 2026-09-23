@@ -22,7 +22,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-GAME = Path(r"D:/SteamLibrary/steamapps/common/Borderlands 2")
+GAME = Path(r"Z:/SteamLibrary/steamapps/common/Borderlands 2")
 PACK = GAME / "sdk_mods" / "bl2_modern"
 LOG = GAME / "Binaries" / "Win32" / "Plugins" / "unrealsdk.log"
 BRIDGE_DIR = PACK / "data" / "bridge"

@@ -14,7 +14,7 @@ import json
 import pathlib
 import sys
 
-GAME = pathlib.Path(r"D:/SteamLibrary/steamapps/common/Borderlands 2")
+GAME = pathlib.Path(r"Z:/SteamLibrary/steamapps/common/Borderlands 2")
 MOD = GAME / "sdk_mods" / "bl2_modern"
 SETTINGS = GAME / "sdk_mods" / "settings" / "bl2_modern.json"
 LOG = GAME / "Binaries" / "Win32" / "Plugins" / "unrealsdk.log"

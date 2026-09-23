@@ -16,7 +16,7 @@
 # Writes: bl2-mcp/tools/stress-travel.log
 
 set -u
-GAME="D:/SteamLibrary/steamapps/common/Borderlands 2"
+GAME="Z:/SteamLibrary/steamapps/common/Borderlands 2"
 TOOLS="$GAME/bl2-mcp/tools"
 LOG="$TOOLS/stress-travel.log"
 ROUNDS="${1:-3}"
