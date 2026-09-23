@@ -16,7 +16,7 @@ from pathlib import Path
 
 import bl2_modern
 from bl2_modern import core, mod
-from bl2_modern.features import FEATURES, bridge, grinder
+from bl2_modern.features import FEATURES, bridge
 from mods_base import BoolOption, NestedOption
 from save_options.registration import load_callbacks, registered_save_options
 
@@ -114,14 +114,13 @@ try:
         f"{len(core.all_keybinds())} gathered by the core, {len(mod.keybinds)} held by the mod: "
         f"{[k.identifier for k in mod.keybinds]}",
     )
+    # Ticket 15 dropped the grinder's key H: the Golden Chest is the only way in. Its menu is
+    # checked in grinder.py.
     _bind = next((k for k in mod.keybinds if k.identifier == "Open the grinder"), None)
     check(
-        "the grinder's keybind is among them, bound to H by default, with something to call",
-        _bind is not None
-        and _bind.default_key == "H"
-        and callable(_bind.callback),
-        f"identifier {getattr(_bind, 'identifier', None)!r}, default key "
-        f"{getattr(_bind, 'default_key', None)!r}, key now {getattr(_bind, 'key', None)!r}",
+        "the grinder has no keybind any more - only the Golden Chest opens it",
+        _bind is None,
+        f"found {getattr(_bind, 'identifier', None)!r}",
     )
     check(
         "network functions live in a feature file and still reach the mod",
@@ -436,37 +435,6 @@ try:
         and _bridge_feature.writes_game_data is True
         and _bridge_feature.apply is bridge._ready,
         "apply=_ready + writes_game_data means apply_all calls it again on every character load",
-    )
-
-    # --- pressing H ------------------------------------------------------------------------
-
-    _boxes = record(grinder)
-    if _bind is not None:
-        _bind.callback()
-    check(
-        "pressing the grinder key puts one menu on screen, titled Grinder",
-        len(_boxes) == 1 and _boxes[0].title == "Grinder" and _boxes[0].shown,
-        f"{[b.title for b in _boxes]}",
-    )
-    check(
-        "that menu offers the five things the grinder can do",
-        len(_boxes) == 1
-        and _boxes[0].names()
-        == [
-            "Perfect an item",
-            "Grind for something better",
-            "Make an item level-less",
-            "Open the chest normally",
-            "Report what the grinder sees",
-        ],
-        f"{_boxes[0].names() if _boxes else []}",
-    )
-    if _boxes:
-        cancel(_boxes[0])       # the feature's own way of clearing _busy
-    check(
-        "backing out of that menu lets the chest hooks work again",
-        grinder._busy is False,
-        f"grinder._busy = {grinder._busy}",
     )
 
 finally:

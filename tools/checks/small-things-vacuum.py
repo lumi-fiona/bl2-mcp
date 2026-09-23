@@ -10,7 +10,6 @@
 reset()
 
 import unrealsdk
-from bl2_modern.features import grinder as G
 from bl2_modern.features import vacuum as W
 
 p = pc()
@@ -159,7 +158,7 @@ try:
         ("class mod", ("classmod", 3)),
         ("relic", ("relic", 3)),
     ):
-        path = G.POOLS.get(pool_key)
+        path = POOLS.get(pool_key)
         made = give(path, lvl, 1) if (ready and path) else []
         if not made:
             check(

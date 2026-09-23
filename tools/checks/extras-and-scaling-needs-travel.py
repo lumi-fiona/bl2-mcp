@@ -39,7 +39,6 @@ import unrealsdk
 
 from bl2_modern import core
 from bl2_modern.features import extras as E
-from bl2_modern.features import grinder as G
 from bl2_modern.features import levelscaling as LS
 from bl2_modern.patchfile import commands_from
 
@@ -142,13 +141,13 @@ def _weapon_damage(stage, tries=12):
     is right now. The game makes them and they are never added to anyone's backpack.
     """
     try:
-        pool = unrealsdk.find_object("ItemPoolDefinition", G.POOLS[("weapon", 3)])
+        pool = unrealsdk.find_object("ItemPoolDefinition", POOLS[("weapon", 3)])
     except Exception as ex:
         print(f"   cannot reach the weapon pool: {ex!r}")
         return 0.0
     damages = []
     for _ in range(tries):
-        for weapon in G._spawn_from_pool(pc(), pool, stage):
+        for weapon in spawn_from_pool(pool, stage):
             try:
                 damage = float(weapon.InstantHitDamage)
             except Exception:

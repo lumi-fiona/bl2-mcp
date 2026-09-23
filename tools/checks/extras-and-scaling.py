@@ -19,7 +19,6 @@ import unrealsdk
 
 from bl2_modern import core
 from bl2_modern.features import extras as E
-from bl2_modern.features import grinder as G
 from bl2_modern.features import levelscaling as LS
 from bl2_modern.patchfile import commands_from, sections_in
 
@@ -415,7 +414,7 @@ try:
 
     pool = None
     try:
-        pool = unrealsdk.find_object("ItemPoolDefinition", G.POOLS[("weapon", 3)])
+        pool = unrealsdk.find_object("ItemPoolDefinition", POOLS[("weapon", 3)])
     except Exception:
         pool = None
 
@@ -428,14 +427,14 @@ try:
     def _batch(count, stage):
         made = []
         for _ in range(count):
-            made.extend(G._spawn_from_pool(pc(), pool, stage))
+            made.extend(spawn_from_pool(pool, stage))
         return made
 
     if pool is None:
         check(
             "the rare weapon pool the scaling test spawns from can be found",
             False,
-            f"no ItemPoolDefinition at {G.POOLS[('weapon', 3)]}",
+            f"no ItemPoolDefinition at {POOLS[('weapon', 3)]}",
         )
     else:
         # Twelve of each, not fifty: every spawn happens inside one frame, and 1.13^49 against

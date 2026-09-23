@@ -13,7 +13,6 @@ reset()
 
 import unrealsdk
 from bl2_modern.features import museum as M
-from bl2_modern.features import grinder as G
 
 p = pc()
 
@@ -86,14 +85,14 @@ try:
     # --- THE CONTROL --------------------------------------------------------------------
     # An ordinary rare gun, made by the game's own pool. If the museum's validation says no to
     # this, the validation is broken and nothing else in this file can be believed.
-    control = give(G.POOLS[("weapon", 4)], level(p), 1)
+    control = give(POOLS[("weapon", 4)], level(p), 1)
     control_item = control[0] if control else None
     if control_item is not None:
         mine.add(uid(control_item))
     check(
         "an ordinary gun could be spawned to check the checker against",
         control_item is not None,
-        f"spawned {len(control)} from {G.POOLS[('weapon', 4)]}",
+        f"spawned {len(control)} from {POOLS[('weapon', 4)]}",
     )
     if control_item is not None:
         control_name = M._readable_name(control_item)

@@ -279,7 +279,7 @@ try:
     # --- the comparison, against the real character -------------------------------------------------------------
     # A real carried item's id is used as the one that survived, and an id nothing has as the one
     # that did not. Nothing is spawned, nothing is removed, nothing is written to any item.
-    from bl2_modern.features.levelless import carried
+    from bl2_modern.features.grinder import carried
 
     live = carried(pc())
     real_ids = []

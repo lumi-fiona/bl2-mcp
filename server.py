@@ -337,17 +337,20 @@ def game_function(class_name: str, function_name: str) -> str:
 
 @mcp.tool()
 def game_backpack() -> str:
-    """List the player's backpack: kind, rarity, level, name and internal definition."""
+    """List the player's backpack: class, rarity, level, name and internal definition."""
+    # Read straight off the game: the old grinder's helpers this used were retired (ticket 19).
     code = (
         "import unrealsdk\n"
-        "from bl2_modern.features import grinder as g\n"
+        "cur = unrealsdk.find_enum('ECurrencyType')\n"
         "pc = unrealsdk.find_all('WillowPlayerController')[-1]\n"
-        "bp = g._backpack(pc)\n"
-        "print(f'{len(bp)} items, ${g._money(pc):,}')\n"
-        "print(f\"{'kind':<9} {'rarity':>6} {'lvl':>4}  {'name':<34} definition\")\n"
+        "bp = list(pc.GetPawnInventoryManager().Backpack)\n"
+        "print(f'{len(bp)} items, ${pc.PlayerReplicationInfo.GetCurrencyOnHand(cur.CURRENCY_Credits):,}')\n"
+        "print(f\"{'class':<24} {'rarity':>6} {'lvl':>4}  {'name':<34} definition\")\n"
         "for i in bp:\n"
-        "    print(f'{g._kind(i):<9} {g._rarity(i):>6} {g._level(i):>4}  "
-        "{g._label(i)[:34]:<34} {g._definition_name(i)}')\n"
+        "    d = i.DefinitionData\n"
+        "    df = getattr(d, 'BalanceDefinition', None) or getattr(d, 'ItemDefinition', None)\n"
+        "    print(f'{i.Class.Name:<24} {int(i.RarityLevel):>6} {int(d.GameStage):>4}  "
+        "{str(i.GetShortHumanReadableName())[:34]:<34} {df.Name if df else None}')\n"
     )
     return _run_in_game(code)
 

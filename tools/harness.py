@@ -325,6 +325,29 @@ def give(pool_path, stage=None, count=1):
     return made
 
 
+# The game's own loot pools by (kind, rarity), for checks that need an item to test with. These
+# lived in the old grinder (retired by ticket 19), and four checks still borrow them.
+POOLS = {
+    ("weapon", 3): "GD_Itempools.WeaponPools.Pool_Weapons_All_04_Rare",
+    ("weapon", 4): "GD_Itempools.WeaponPools.Pool_Weapons_All_05_VeryRare",
+    ("shield", 3): "GD_Itempools.ShieldPools.Pool_Shields_All_04_Rare",
+    ("grenade", 3): "GD_Itempools.GrenadeModPools.Pool_GrenadeMods_04_Rare",
+    ("classmod", 3): "GD_Itempools.ClassModPools.Pool_ClassMod_04_Rare",
+    ("relic", 3): "GD_Itempools.ArtifactPools.Pool_Artifacts_03_Rare",
+}
+
+
+def spawn_from_pool(pool, stage):
+    """Items the game makes from one of its pools, NOT added to any backpack (the old
+    grinder's _spawn_from_pool: eight arguments, measured 2026-08-19)."""
+    import unrealsdk
+
+    ok, items = unrealsdk.find_all("ItemPool")[-1].SpawnBalancedInventoryFromPool(
+        pool, int(stage), 0, pc(), [], None, 1.0, False,
+    )
+    return list(items or [])
+
+
 def add_money(amount):
     import unrealsdk
 

@@ -27,7 +27,7 @@
 # this is the one area of the game where being wrong costs gear rather than time.
 
 from bl2_modern.features import itemcheck as I
-from bl2_modern.features.levelless import carried
+from bl2_modern.features.grinder import carried
 
 if not hasattr(I, "_armed"):
     # ---------------- ARM ----------------------------------------------------------------
