@@ -13,7 +13,8 @@ GAME="Z:/SteamLibrary/steamapps/common/Borderlands 2"
 TOOLS="$GAME/bl2-mcp/tools"
 CHECKS="$TOOLS/checks"
 FILTER="${1:-}"
-OUT="$CHECKS/RESULTS.txt"
+# A filtered run gets its own file: it used to truncate the full-suite RESULTS.txt (2026-09-23).
+OUT="$CHECKS/RESULTS${FILTER:+-$FILTER}.txt"
 
 : > "$OUT"
 skipped=()

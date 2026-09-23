@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
-# Launch Borderlands 2 and leave it running, past the press-any-key screen.
-GAME="Z:/SteamLibrary/steamapps/common/Borderlands 2"
-LOG="$GAME/Binaries/Win32/Plugins/unrealsdk.log"
-taskkill //F //IM Borderlands2.exe >/dev/null 2>&1; sleep 2; rm -f "$LOG"
-cd "$GAME/Binaries/Win32" || exit 1
-nohup "./Borderlands2.exe" -NoLauncher -nostartupmovies >/dev/null 2>&1 &
-for i in $(seq 1 70); do
-  sleep 3
-  if grep -q "core.py@.*loaded" "$LOG" 2>/dev/null; then sleep 6; echo "up"; exit 0; fi
-  # Only press keys when explicitly allowed. Sending a key means pulling the game window to
-  # the front and typing into it, which lands in whatever Lumi is doing if she is at the PC.
-  if [ "$i" -ge 4 ] && [ "${BL2_STEAL_FOCUS:-0}" = "1" ]; then
-    powershell -NoProfile -Command '$w=New-Object -ComObject wscript.shell; if($w.AppActivate("Borderlands 2")){Start-Sleep -Milliseconds 250; $w.SendKeys(" ")}' >/dev/null 2>&1
-  fi
-done
-echo "FAILED to reach the menu"; exit 1
+# Launch Borderlands 2 and stop at the main menu. No keys are ever sent.
+#
+# This used to start the game itself and wait 3.5 minutes for the pack's "core.py@... loaded" log
+# line. That line is written, at the main menu (2026-09-23: "up" after 66 s), but the title screen
+# walks itself to the menu after a delay nothing here controls: 66 s, 158 s (ticket 01), and past
+# the whole wait in ticket 06, which printed FAILED while cycle.sh --menu - which walks the title
+# screen itself through the bridge - reached the menu in about 50 s the same session. It also
+# killed with a fixed 2 s wait, where cycle.sh waits until the old process is really gone.
+exec bash "$(dirname "$0")/cycle.sh" --menu
