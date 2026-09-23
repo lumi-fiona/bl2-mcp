@@ -1,10 +1,12 @@
-# The Golden Chest grinder (ticket 19) - the claims that hold inside one frame.
-# Run: bash bl2-mcp/tools/run-checks.sh grinder     (a character must be loaded)
+# The Golden Chest grinder (tickets 19 and 45) - the claims that hold inside one frame.
+# Run: bash bl2-mcp/tools/run-checks.sh grinder     (a character must be loaded, in Sanctuary for
+# the chest's own claims)
 #
 # The chest's own open, its loot moment 1.35 s later and the lid closing need time to pass, so they
-# are not here: ticket 19's answer has them, measured with screenshots. Everything below uses items
+# are not here: tickets 19 and 45 have them, measured with screenshots. Everything below uses items
 # this file spawns, and puts back what it changes (money, eridium, the level-less list, the
-# backpack count).
+# backpack count, the switch). A result laid in the closed chest and taken out again leaves it as
+# it was: its detach event belongs to its Opened sequence (measured, ticket 45).
 reset()
 
 import copy
@@ -24,6 +26,10 @@ lvl = level(p)
 MAL2 = "GD_Weap_Pistol.A_Weapons.Pistol_Maliwan_2_Uncommon"      # four elements on its list
 HELLFIRE = "GD_Weap_SMG.A_Weapons_Legendary.SMG_Maliwan_5_HellFire"  # fire only
 JAKOBS = "GD_Weap_Pistol.A_Weapons.Pistol_Jakobs_2_Uncommon"      # element list switched off
+LAUNCHER = "GD_Weap_Launchers.A_Weapons.RL_Maliwan_2_Uncommon"
+SMG = "GD_Weap_SMG.A_Weapons.SMG_Maliwan_2_Uncommon"
+SHOTGUN = "GD_Weap_Shotgun.A_Weapons.SG_Torgue_2_Uncommon"
+SNIPER = "GD_Weap_SniperRifles.A_Weapons.Sniper_Maliwan_2_Uncommon"
 
 made_uids = []
 ids_before = set(G._ids)
@@ -50,7 +56,7 @@ def attributes_vs_fresh(gun):
         return {n: (round(float(getattr(gun, n)), 4), round(float(getattr(fresh, n)), 4))
                 for n in names if round(float(getattr(gun, n)), 4) != round(float(getattr(fresh, n)), 4)}
     finally:
-        fresh.Destroy()
+        G._remove(fresh)
 
 
 def state():
@@ -194,13 +200,15 @@ try:
     check("using up a gun keeps the backpack's count equal to what is in it",
           manager.BackpackInventoryCount == len(backpack(p)),
           f"count {manager.BackpackInventoryCount}, backpack {len(backpack(p))}")
+    check("a used-up gun is set to leave the game (Destroy() from Python leaves it, measured)",
+          0 < float(d.LifeSpan) < 1, f"LifeSpan {float(d.LifeSpan)}")
 
     # --- a result left on the floor goes in even with a full backpack ---------------------------
     e, = roll(JAKOBS)
     uid_e = G._uid(e)
     thrown = G._weapon_maker().CreateWeaponFromDef(copy.copy(e.DefinitionData), p.Pawn, False)
     manager.RemoveInventoryFromBackpack(e)
-    e.Destroy()
+    G._remove(e)
     manager.UpdateBackpackInventoryCount()
     thrown.ItemLocation = 2
     loc = p.Pawn.Location
@@ -218,18 +226,143 @@ try:
     uid_f = G._uid(f_)
     thrown = G._weapon_maker().CreateWeaponFromDef(copy.copy(f_.DefinitionData), p.Pawn, False)
     manager.RemoveInventoryFromBackpack(f_)
-    f_.Destroy()
+    G._remove(f_)
     manager.UpdateBackpackInventoryCount()
     thrown.ItemLocation = 2
     pickup = thrown.DropFrom(unrealsdk.make_struct("Vector", X=loc.X, Y=loc.Y, Z=loc.Z), unrealsdk.make_struct("Vector"),
                              False, False, unrealsdk.make_struct("Vector"))
-    G._outputs.append((unrealsdk.unreal.WeakPointer(pickup), uid_f, __import__("time").monotonic()))
+    G._outputs.append((unrealsdk.unreal.WeakPointer(pickup), uid_f))
     G.on_travel(None, None, None, None)  # what TravelToStation reaches before the map goes
-    check("a result still on the floor goes into the backpack when you travel",
-          G._is_carried(p, uid_f) and not any(u == uid_f for _p, u, _t in G._outputs),
+    check("a result still lying there goes into the backpack when you travel",
+          G._is_carried(p, uid_f) and not any(u == uid_f for _p, u in G._outputs),
           f"carried {G._is_carried(p, uid_f)}")
 
+    # --- ticket 45: one gun lies where the chest's own first one of its kind does -------------
+    kinds = {}
+    for kind, balance in (("pistol", MAL2), ("launcher", LAUNCHER), ("smg", SMG), ("shotgun", SHOTGUN),
+                          ("sniper", SNIPER)):
+        kinds[kind], = roll(balance)
+    sockets = {k: G._socket(g) for k, g in kinds.items()}
+    check("a pistol lies at Pistol2, a launcher at Launcher1, every other gun at Gun1",
+          sockets == {"pistol": "Pistol2", "launcher": "Launcher1", "smg": "Gun1", "shotgun": "Gun1",
+                      "sniper": "Gun1"}, f"{sockets}")
+
+    # --- Lumi, ticket 45: a perfected gun keeps its old name ---------------------------------
+    # Into the backpack a gun's name is picked afresh from its parts; the Vladof barrel names a
+    # Maliwan pistol "Umbrage". The control, with no kept name, shows the pick happening.
+    vladof = unrealsdk.find_object("WeaponPartDefinition", "GD_Weap_Pistol.Barrel.Pistol_Barrel_Vladof")
+    plain_title = unrealsdk.find_object("WeaponNamePartDefinition", "GD_Weap_Pistol.Name.Title_Maliwan.Title__Pistol")
+    base_gun, = roll(MAL2)
+    titles = {}
+    for keep in (False, True):
+        nd = copy.copy(base_gun.DefinitionData)
+        nd.BarrelPartDefinition, nd.TitlePartDefinition = vladof, plain_title
+        nd.UniqueId = G._new_uid(p)
+        made_uids.append(int(nd.UniqueId))
+        if keep:
+            G._names[int(nd.UniqueId)] = G._name_parts(nd)
+        new_gun = G._weapon_maker().CreateWeaponFromDef(nd, p.Pawn, False)
+        manager.AddBackpackInventory(new_gun)
+        in_bag = G._held(p, int(nd.UniqueId))
+        titles[keep] = str(in_bag.DefinitionData.TitlePartDefinition.Name) if in_bag else None
+        if in_bag != new_gun:
+            G._remove(new_gun)
+        G._names.pop(int(nd.UniqueId), None)
+    check("into the backpack, the game names a gun by its parts (control: Vladof barrel -> Umbrage title)",
+          titles[False] == "Title_Barrel_Vladof_Rapid", f"{titles}")
+    check("a perfected gun keeps its old name into the backpack", titles[True] == "Title__Pistol", f"{titles}")
+
+    chests = G._chests()
+    check("the Golden Chest is in this map (the chest's claims below need Sanctuary)", len(chests) == 1,
+          f"{len(chests)} chests")
+    if chests:
+        c = chests[0]
+        use = int(G._price(c).UsabilityType)
+
+        def chest_now():
+            return (sorted(G._state(c)), int(c.bCostsToUse[use]), str(c.InteractionIconOverride[use]))
+
+        # --- ticket 44: the prompt and the price ------------------------------------------------
+        check("the chest's prompt is the game's own OPEN prompt reading GRINDER",
+              G._icon is not None and c.InteractionIconOverride[use] == G._icon
+              and str(G._icon.Text) == "GRINDER" and str(G._icon.Action) == "Use",
+              f"{chest_now()}")
+        check("the grinder's chest asks no golden key", int(c.bCostsToUse[use]) == 0, f"{chest_now()}")
+        closed_price = G._price(c)
+        closed_price.ApplyBehaviorToContext(c, unrealsdk.make_struct("BehaviorKernelInfo"), c, p.Pawn,
+                                            None, unrealsdk.make_struct("BehaviorParameters"))
+        check("the chest's own price step, as every close runs it, puts no price back",
+              int(c.bCostsToUse[use]) == 0, f"{chest_now()}")
+        was_ready = G._ready(c)
+        G.enabled.value = False
+        off = chest_now()
+        G.enabled.value = True
+        on = chest_now()
+        check("switched off, the chest has its own prompt and its key price back (closed chest)",
+              off[2] == "None" and (off[1] == 1 or not was_ready), f"{off}")
+        check("switched on again, it is the grinder's chest again", on[1] == 0 and "SecondWindGrinder" in on[2],
+              f"{on}")
+
+        # --- ticket 45: the result lies in the chest as the chest's own loot does ---------------
+        if G._ready(c) and not G._holding(c):
+            before = chest_now()
+            step = G._behaviour(c, "SpawningLoot", lambda b: b.Class.Name == "Behavior_AttachItems")
+            green, = roll(JAKOBS)
+            bag_before = sorted(G._uid(i) for i in G.carried(p))
+            plain = G._weapon_maker().CreateWeaponFromDef(copy.copy(green.DefinitionData), p.Pawn, False)
+            loose = plain.GetPickup(True, not step.bDisablePickups)
+            check("a green gun's pickup would shrink away: the game gives it a lifespan",
+                  loose is not None and float(loose.LifeSpan) > 0 and loose.IsTimerActive("ShrinkPickupBeforeDestruction"),
+                  f"LifeSpan {getattr(loose, 'LifeSpan', None)}")
+            G._discard(p, loose)
+            check("a pickup that is not laid in goes away with its gun (nothing made for free)",
+                  loose.bDeleteMe and loose.Inventory is None and 0 < float(plain.LifeSpan) < 1
+                  and sorted(G._uid(i) for i in G.carried(p)) == bag_before,
+                  f"pickup deleted {loose.bDeleteMe}, gun LifeSpan {float(plain.LifeSpan)}")
+            data = copy.copy(green.DefinitionData)
+            data.UniqueId = G._new_uid(p)
+            laid = G._mount(p, c, data, int(unrealsdk.find_enum("PlayerMark").PM_Favorite), step)
+            ok_ = laid is not None
+            socket = G._socket(green)
+            _s_ok, s_loc, s_rot = c.ObjectMesh.GetSocketWorldLocationAndRotation(
+                socket, unrealsdk.make_struct("Vector"), unrealsdk.make_struct("Rotator"))
+            check("the result is attached to the chest at its socket, on the bottom shelf",
+                  ok_ and laid.bIsPickupAttachedToSomething and laid.Base == c and laid.bHardAttach
+                  and str(laid.BaseBoneName) == "Bone_Bottom_Shelf",
+                  f"base {getattr(laid, 'Base', None)}, bone {getattr(laid, 'BaseBoneName', None)}")
+            check("it lies exactly on the socket, as the chest's own guns do",
+                  ok_ and all(abs(a - b) < 0.2 for a, b in ((laid.Location.X, s_loc.X), (laid.Location.Y, s_loc.Y),
+                                                           (laid.Location.Z, s_loc.Z)))
+                  and (laid.Rotation.Pitch, laid.Rotation.Yaw, laid.Rotation.Roll) == (s_rot.Pitch, s_rot.Yaw, s_rot.Roll))
+            check("it is not pickupable until the lid's animation says so, as the chest's own loot",
+                  ok_ and not laid.bPickupable and int(laid.Inventory.ItemLocation) == 6)
+            check("it is kept across level transitions exactly when the chest's loot is",
+                  ok_ and bool(laid.bCanBeSavedAcrossLevelTransition) == (not c.WillLootableBeResetOnLevelLoad()))
+            check("it lies there forever, as the chest's own purple loot does",
+                  ok_ and float(laid.LifeSpan) == 0.0 and not laid.IsTimerActive("ShrinkPickupBeforeDestruction")
+                  and int(laid.LifeSpanType) == int(unrealsdk.find_enum("EDropLifeSpanType").DROP_LiveForever))
+            check("it carries the star, and its new id", ok_ and int(laid.Inventory.GetMark()) == int(
+                unrealsdk.find_enum("PlayerMark").PM_Favorite) and G._uid(laid.Inventory) == int(data.UniqueId))
+            check("the grinder sees the chest holding it (so it never closes the lid over it)",
+                  ok_ and G._holding(c))
+            if ok_:
+                # Lumi: it stays in the chest until she takes it or leaves; a save carries it.
+                outputs_before = list(G._outputs)
+                G._outputs.append((unrealsdk.unreal.WeakPointer(laid), G._uid(laid.Inventory)))
+                G.on_save(p, None, None, None)
+                during = G._held(p, int(data.UniqueId)) is not None and G._holding(c)
+                G.on_saved(p, None, None, None)
+                after = G._held(p, int(data.UniqueId)) is None and G._holding(c) and not laid.bDeleteMe
+                G._outputs[:] = outputs_before
+                check("a save has the waiting result in the backpack it writes, and it stays in the chest",
+                      during and after and manager.BackpackInventoryCount == len(backpack(p)),
+                      f"during {during}, after {after}")
+                G._discard(p, laid)
+            check("taken out again, the closed chest is exactly as it was, and holds nothing",
+                  chest_now() == before and not G._holding(c), f"{before} -> {chest_now()}")
+
 finally:
+    G.enabled.value = True
     restore()
     G._ids.clear()
     G._ids.update(ids_before)
@@ -237,7 +370,7 @@ finally:
         item = G._held(p, uid)
         if item is not None:
             manager.RemoveInventoryFromBackpack(item)
-            item.Destroy()
+            G._remove(item)
     manager.UpdateBackpackInventoryCount()
     pri.AddCurrencyOnHand(cur.CURRENCY_Credits, wallet_before[0] - pri.GetCurrencyOnHand(cur.CURRENCY_Credits))
     pri.AddCurrencyOnHand(cur.CURRENCY_Eridium, wallet_before[1] - pri.GetCurrencyOnHand(cur.CURRENCY_Eridium))

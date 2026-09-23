@@ -1,4 +1,4 @@
-"""The Golden Chest grinder (ticket 19) - the claims that live on disk.
+"""The Golden Chest grinder (tickets 19 and 45) - the claims that live on disk.
 
 Ordinary Python, outside the game:
 
@@ -64,6 +64,32 @@ check("a relevel resets a gun's attributes first (each re-init adds to some, mea
 check("using up an item refreshes the backpack's own count", "UpdateBackpackInventoryCount()" in src)
 check("a result on the floor goes along when you travel, not only when you save",
       '@hook("WillowGame.WillowGameInfo:TravelToStation")' in src and "on_travel" in src.split("hooks=[")[-1])
+
+# Ticket 45: the result lies in the chest, laid there with the chest's own loot step's calls.
+check("the result is laid in the chest with the loot step's own calls, not thrown out of it",
+      "made.GetPickup(True, not step.bDisablePickups)" in src and "pickup.AttachPickupToWorldBody(chest" in src
+      and "DropFrom" not in src and "_burst" not in src)
+check("nothing is taken until the result lies in the chest",
+      src.index("pickup = _mount(") < src.index("_use_up(pc, item)")
+      and "if pickup.bIsPickupAttachedToSomething and pickup.Base == chest:" in src)
+check("a result waits in the chest: ticket 19's 30 s give-back rule is gone",
+      "GIVE_BACK_AFTER" not in src and "now=True" not in src)
+check("the grinder never closes the lid over something lying in the chest",
+      "if not _holding(chest):" in src)
+check("an open chest holding nothing is queued to close when its Opened sequence starts",
+      '@hook("WillowGame.WillowInteractiveObject:Behavior_ChangeUsability")' in src
+      and "on_usability" in src.split("hooks=[")[-1] and "_closing.append(WeakPointer(chest))\n    return Block" not in src)
+check("the prompt reads GRINDER, and the hook that keeps the key price off is registered",
+      'PROMPT = "GRINDER"' in src and "on_price" in src.split("hooks=[")[-1])
+save_hook = src.split('@hook("WillowGame.WillowPlayerController:SaveGame")')[-1].split("@hook")[0]
+check("a save carries a waiting result and leaves it in the chest; only travel hands it over (Lumi)",
+      "_carry_into_save(obj)" in save_hook and "_give_back" not in save_hook
+      and "on_saved" in src.split("hooks=[")[-1])
+check("guns the grinder makes or uses up leave the game by lifespan; Destroy() from Python leaves them",
+      ".Destroy()" not in src and "gun.LifeSpan = 0.001" in src)
+check("a perfected gun keeps its old name, per character (Lumi)",
+      'HiddenSaveOption("Perfected names", {})' in src and "on_weapon_init" in src.split("hooks=[")[-1]
+      and "_names[new] = kept or _name_parts(gun.DefinitionData)" in src)
 
 checks = [p for p in (TOOLS / "checks").glob("*.py") if p.name != Path(__file__).name]
 borrowed = [p.name for p in checks + [TOOLS / "harness.py", ROOT / "bl2-mcp" / "server.py"]
