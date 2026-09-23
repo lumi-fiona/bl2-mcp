@@ -22,6 +22,7 @@
 reset()
 
 import unrealsdk
+from unrealsdk.hooks import Block, Type
 from bl2_modern import core
 from bl2_modern.difficulty import SETTABLE, custom_levels
 from bl2_modern.features import difficulty as D
@@ -128,7 +129,9 @@ def _d_main():
     snap_heal = _d_heal(obj)
     snap_heal_memory = dict(D._healing_original)
     snap_asked = D._asked
-    options = [D.preset, D.start_level, D.ask_on_new, D.custom_health, D.custom_regen]
+    # mode_chosen first: putting it back before the preset keeps the preset's own change
+    # callback (gated on it) from rewriting the table on the way out.
+    options = [D.mode_chosen, D.preset, D.start_level, D.ask_on_new, D.custom_health, D.custom_regen]
     # A list of pairs, not a dict: mods_base options are dataclasses with eq, so they are
     # unhashable and cannot be dict keys - the same trap as OptionBoxButton.
     snap_options = [(o, o.value) for o in options]
@@ -148,6 +151,10 @@ def _d_main():
         )
 
     try:
+        # Every claim below the record's own was written for a character that HAS chosen a
+        # mode - the spinner and sliders only move the table for one (ticket 16).
+        D.mode_chosen.value = True
+
         # --- claim 2: does a write on a pulled-out tier reach the object? -------------
         # The single most load-bearing unproven claim in the feature. If list() hands back
         # copies, _apply (difficulty.py:203-205) is a silent no-op and every preset check
@@ -370,11 +377,17 @@ def _d_main():
         # Claim 17. difficulty.py:364-367 only logs when the Leave button is picked, so on
         # the documented no-save_options path (difficulty.py:32-38) the spinner keeps the
         # previous character's mode and the next level load converts them to UVHM anyway.
+        D.mode_chosen.value = False
         pick(box, "Normal")
         check(
             "picking 'Leave the game exactly as it is' leaves the preset reading Normal",
             D.preset.value == D.NORMAL,
             f"preset reads {D.preset.value!r} after picking Normal",
+        )
+        check(
+            "answering the picker, even with Normal, records that this character has chosen",
+            D.mode_chosen.value is True,
+            f"mode_chosen={D.mode_chosen.value!r} after picking Normal",
         )
         # The box is built with neither prevent_cancelling nor on_cancel (difficulty.py:373-381),
         # so escape closes it with _asked still True and the question never returns.
@@ -386,6 +399,17 @@ def _d_main():
             f"prevent_cancelling={box.kw.get('prevent_cancelling')!r}, "
             f"on_cancel={box.kw.get('on_cancel')!r}",
         )
+        D.mode_chosen.value = False
+        D._asked = False
+        boxes_esc = record(D)
+        D._ask(pc())
+        cancel(boxes_esc[-1])
+        check(
+            "backing out of the picker does not count as choosing",
+            D.mode_chosen.value is False and D._asked is False,
+            f"mode_chosen={D.mode_chosen.value!r}, _asked={D._asked}",
+        )
+        D.mode_chosen.value = True
         # The other half of claim 16: asked once per trip out to the main menu, so making two
         # characters in one sitting prompts for both.
         D._asked = True
@@ -428,6 +452,91 @@ def _d_main():
             not loud,
             f"_apply called with {loud} after a failed switch - difficulty.py:416 drops the "
             f"return value the picker at :370 checks",
+        )
+
+        # --- ticket 16: the record decides, not the playthrough -----------------------
+        # Still stubbed: nothing below can move anybody or write the table.
+        check(
+            "the spawn hook runs after SpawningProcessComplete, where the game's reset is already done",
+            [t for _, t in D.on_character_live.hook_funcs] == [Type.POST],
+            f"hook types {[t for _, t in D.on_character_live.hook_funcs]}",
+        )
+        switched = []
+        D._switch_to_uvhm = lambda _pc: switched.append(1) or False
+        D.mode_chosen.value = False
+        D._asked = True  # no box: this is about the move, not the question
+        D.preset.value = "UVHM"
+        applied.clear()
+        D.on_character_live(pc(), None, None, None)
+        check(
+            "a character that never chose is left alone at spawn, whatever the spinner reads",
+            not switched and not [c for c, quiet in applied if not quiet],
+            f"switch tried {len(switched)} times, applied {applied}",
+        )
+        # A stand-in for a first-playthrough controller, so this holds on any loaded character.
+        class _DFirstPlaythrough:
+            def GetCurrentPlaythrough(self):
+                return 0
+
+        boxes_new = record(D)
+        D._asked = False
+        D.ask_on_new.value = False
+        D.on_character_live(_DFirstPlaythrough(), None, None, None)
+        asked_off = len(boxes_new)
+        D.ask_on_new.value = True
+        D.on_character_live(_DFirstPlaythrough(), None, None, None)
+        check(
+            "an unasked first-playthrough character gets the box, and none with asking switched off",
+            asked_off == 0 and len(boxes_new) == 1 and not switched,
+            f"boxes with asking off {asked_off}, on {len(boxes_new) - asked_off}, switch tried {len(switched)}",
+        )
+        applied.clear()
+        D.preset.value = "Second Wind"
+        check(
+            "moving the spinner on a character that never chose writes nothing",
+            not applied,
+            f"applied {applied}",
+        )
+        applied.clear()
+        D._apply_current()
+        check(
+            "the menu and load-time apply give a character that never chose the game's own rules",
+            applied == [(D.NORMAL, True)],
+            f"applied {applied}",
+        )
+        D.mode_chosen.value = True
+        applied.clear()
+        D._apply_current()
+        check(
+            "the load-time apply gives a character that chose its own mode",
+            applied == [("Second Wind", True)],
+            f"applied {applied}",
+        )
+
+        # The welcome box. Stand-in controllers, so no real one is touched.
+        class _DPRI:
+            def __init__(self, completed):
+                self.HighestCompletedPlayThrough = completed
+
+        class _DPC:
+            def __init__(self, completed):
+                self.PlayerReplicationInfo = _DPRI(completed)
+
+        decisions = {
+            "Second Wind, 0 completed": D.on_uvhm_welcome(_DPC(0), None, None, None),
+            "Second Wind, 2 completed": D.on_uvhm_welcome(_DPC(2), None, None, None),
+        }
+        D.preset.value = "UVHM"
+        decisions["UVHM preset, 0 completed"] = D.on_uvhm_welcome(_DPC(0), None, None, None)
+        D.mode_chosen.value = False
+        D.preset.value = "Second Wind"
+        decisions["never chose, spinner on Second Wind"] = D.on_uvhm_welcome(_DPC(0), None, None, None)
+        D.mode_chosen.value = True
+        check(
+            "the UVHM welcome box is silenced for a Second Wind character and for nobody else",
+            decisions["Second Wind, 0 completed"] is Block
+            and all(v is None for k, v in decisions.items() if k != "Second Wind, 0 completed"),
+            f"{ {k: getattr(v, '__name__', v) for k, v in decisions.items()} }",
         )
         D._switch_to_uvhm = real_switch
         D._apply = real_apply
@@ -487,6 +596,16 @@ def _d_main():
             f"PER_CHARACTER={D.PER_CHARACTER}, save_options="
             f"{[o.identifier for o in (mine.save_options if mine else [])]}, and a character "
             f"load resets it to {D.preset.default_value!r} (save_options/hooks.py:125-132)",
+        )
+        check(
+            "whether a character chose is kept on the character and never in the settings file",
+            mine is not None
+            and any(o is D.mode_chosen for o in mine.save_options)
+            and not any(o is D.mode_chosen for o in mine.options)
+            and D.mode_chosen.default_value is False,
+            f"in save_options={mine is not None and any(o is D.mode_chosen for o in mine.save_options)}, "
+            f"in options={mine is not None and any(o is D.mode_chosen for o in mine.options)}, "
+            f"default {D.mode_chosen.default_value!r}",
         )
 
     finally:
