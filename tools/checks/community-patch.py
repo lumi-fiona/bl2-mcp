@@ -58,7 +58,7 @@ touched = []  # (path, property, the value it had before this script wrote to it
 def recording_run(commands):
     """Stands in for core._run: counts what would have been sent, sends nothing."""
     sent.extend(commands)
-    return len(commands), 0
+    return len(commands), 0, 0
 
 
 def probe(sections):
@@ -298,16 +298,15 @@ try:
 
     core._run = real_run
 
-    # --- claim 4: the log line counts calls, not effects -----------------------------------
-    # This PASSES while the bug is present, deliberately. ConsoleCommand does not raise on a set
-    # naming an object that does not exist, so _run counts it as run. Teach _run to check and this
-    # check turns red, which is the good news.
-    ran, failed = core._run(["set No.Such.Object NoSuchProp 1"])
+    # --- claim 4: the log line counts effects, not calls ------------------------------------
+    # Until ticket 49 this passed with (1 run, 0 failed): ConsoleCommand does not raise on a set
+    # naming an object that does not exist, so _run counted it as run. _run now reads every line
+    # back, so the same line is counted as waiting for its object, and never as landed.
+    landed, failed, absent = core._run(["set No.Such.Object NoSuchProp 1"])
     check(
-        "a set naming an object that does not exist is still counted as a command that ran",
-        (ran, failed) == (1, 0),
-        f"_run reported {ran} run and {failed} failed for one command that cannot have worked, so"
-        " 'N commands run, 0 failed' in the log is not evidence that the patch landed",
+        "a set naming an object that does not exist is counted as not loaded, not as landed",
+        (landed, failed, absent) == (0, 0, 1),
+        f"_run reported {landed} landed, {failed} failed, {absent} not loaded",
     )
 
     # --- claim 3: do the patch's commands actually change anything ------------------------

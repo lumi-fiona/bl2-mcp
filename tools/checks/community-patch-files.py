@@ -12,6 +12,7 @@ If it is mid-boot they will fail; re-run once it has settled rather than believi
 
 import json
 import pathlib
+import re
 import sys
 
 GAME = pathlib.Path(r"Z:/SteamLibrary/steamapps/common/Borderlands 2")
@@ -216,11 +217,18 @@ def main():
     )
 
     # --- claim 4 / the bug behind it ------------------------------------------------------
-    # PASSES while the bug is present: the pack cannot tell a landed command from an ignored one,
-    # so it reports zero failures out of thousands. If this ever goes red, _run learned to check.
+    # Until ticket 49 this line always said "0 failed", because the pack could not tell a landed
+    # command from an ignored one. _run now reads every line back, so the line says how many
+    # landed, and landed + failed + not loaded is every command it ran.
+    counted = [
+        re.search(r"(\d+) commands run, (\d+) failed,.*read back, (\d+) landed and (\d+) are not loaded", line)
+        for line in applied
+    ]
     check(
-        "that line claims zero failures, which is what it would say if nothing had landed",
-        bool(applied) and "0 failed" in applied[-1],
+        "that line counts what landed, and its numbers add up to the commands run",
+        bool(counted) and counted[-1] is not None
+        and int(counted[-1].group(1)) == sum(int(counted[-1].group(n)) for n in (2, 3, 4))
+        and int(counted[-1].group(3)) > 0,
         applied[-1].split("INFO|")[-1].strip() if applied else "no line to read",
     )
 

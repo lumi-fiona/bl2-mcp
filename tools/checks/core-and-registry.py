@@ -265,11 +265,13 @@ try:
 
     _fake = _FakeController()
     core.get_pc = lambda: _fake
-    _ran, _failed = core._run(["set A B 1", "BOOM", "set C D 2"])
+    # Since ticket 49 _run reads each line back: "A" and "C" are no loaded object, so those two
+    # count as not loaded; BOOM raises and counts as the one failure.
+    _landed, _failed, _absent = core._run(["set A B 1", "BOOM", "set C D 2"])
     check(
         "a command that raises is counted and the commands after it still run",
-        (_ran, _failed) == (2, 1) and _fake.seen == ["set A B 1", "BOOM", "set C D 2"],
-        f"{_ran} ran, {_failed} failed, saw {_fake.seen}",
+        (_landed, _failed, _absent) == (0, 1, 2) and _fake.seen == ["set A B 1", "BOOM", "set C D 2"],
+        f"{_landed} landed, {_failed} failed, {_absent} not loaded, saw {_fake.seen}",
     )
 
     # The other half of the same claim, and it does NOT hold: get_pc is called outside the

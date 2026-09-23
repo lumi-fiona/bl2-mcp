@@ -300,11 +300,26 @@ def check_log():
         bool(numbers) and all(int(m.group(2)) > 0 for m in numbers),
         ", ".join(f"{m.group(1)}: {m.group(2)} run" for m in numbers),
     )
+    # This used to claim "not one patch command was refused" - true only because nothing was
+    # ever read back (ticket 49). Now every line is, so "failed" is a real count and the line's
+    # own numbers must add up to the commands it ran.
+    read_back = [
+        re.search(r"read back, (\d+) landed and (\d+) are not loaded", line) for line in applied
+    ]
     check(
-        "not one patch command was refused, which is also why the one-bad-line-cannot-stop-the-rest branch has never run for real",
-        bool(numbers) and all(int(m.group(3)) == 0 for m in numbers),
-        ", ".join(f"{m.group(1)}: {m.group(3)} failed" for m in numbers)
-        + " - the in-game file exercises that branch against a stand-in controller",
+        "every patch line reads its commands back: failed + landed + not loaded is the commands run",
+        bool(numbers)
+        and len(read_back) == len(numbers)
+        and all(
+            r is not None
+            and int(m.group(2)) == int(m.group(3)) + int(r.group(1)) + int(r.group(2))
+            for m, r in zip(numbers, read_back)
+        ),
+        ", ".join(
+            f"{m.group(1)}: {m.group(2)} run = {m.group(3)} failed + "
+            f"{r.group(1) if r else '?'} landed + {r.group(2) if r else '?'} not loaded"
+            for m, r in zip(numbers, read_back)
+        ),
     )
     # The audit asks for "483 keys in _by_level (479 + 4)". Both halves are wrong: 483 counts
     # commands, not maps, and the figure moves the moment a patch section is unticked - with the
