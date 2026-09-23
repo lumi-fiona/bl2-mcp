@@ -128,6 +128,20 @@ def main():
         f"{len([c for _, c in hotfixes if target in c])} of them touching {target}",
     )
 
+    # --- ticket 21: Nifsara's slag against the bundled Community Patch -----------------
+    # The whole file, sections switched off and hotfixes included, in both the set form and
+    # the hotfix form - so a patch section turned on later cannot start fighting the switch.
+    slag_hits = []
+    for command in dm.SLAG_SECOND_WIND:
+        obj, prop = command.split(" ")[1:3]
+        slag_hits += [form for form in (f"{obj} {prop}", f"{obj},{prop},") if form in text]
+    check(
+        "nothing in the Community Patch writes what the Second Wind slag switch writes",
+        not slag_hits,
+        f"collisions: {slag_hits}" if slag_hits else
+        f"none of {[' '.join(c.split(' ')[1:3]) for c in dm.SLAG_SECOND_WIND]} appears anywhere in the patch",
+    )
+
     if writes:
         command = writes[0]
         tiers = re.findall(r"MinEffectiveLevel=(\d+)", command)

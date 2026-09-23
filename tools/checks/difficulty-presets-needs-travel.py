@@ -116,7 +116,7 @@ def _dt_arm():
         "table": _dt_table(obj),
         "heal": _dt_heal(obj),
         "memory": dict(D._healing_original),
-        "asked": D._asked,
+        "new_character": D._new_character,
         "options": [(o, o.value) for o in (D.preset, D.start_level, D.custom_health)],
         "playthrough": playthrough,
     }
@@ -230,7 +230,7 @@ def _dt_measure(state):
     finally:
         D._healing_original.clear()
         D._healing_original.update(state["memory"])
-        D._asked = state["asked"]
+        D._new_character = state["new_character"]
         for option, value in state["options"]:
             try:
                 option.value = value

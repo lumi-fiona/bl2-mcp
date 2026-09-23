@@ -216,7 +216,11 @@ try:
     )
 
     # --- the preset warning -------------------------------------------------------------------------------
+    # The readout names the mode the character plays (ticket 21), which is the spinner only once
+    # the character has chosen - so this runs as a character that has.
+    was["chosen"] = D.mode_chosen.value
     was["preset"] = D.preset.value
+    D.mode_chosen.value = True
     D.preset.value = "UVHM"
     wipe()
     feed(40, 20.0)
@@ -224,6 +228,7 @@ try:
     D.preset.value = "Custom"
     on_custom = R.report()
     D.preset.value = was["preset"]
+    D.mode_chosen.value = was["chosen"]
     check(
         "on a preset, the readout says those numbers are not even in use",
         "does not read those numbers" in with_preset,
@@ -311,6 +316,8 @@ finally:
     R._began = was["began"]
     if "preset" in was:
         D.preset.value = was["preset"]
+    if "chosen" in was:
+        D.mode_chosen.value = was["chosen"]
 
     check(
         "everything this file changed has been put back",
