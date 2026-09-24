@@ -196,6 +196,35 @@ def main():
         f"because it is SM_NoBorder too, it is only excluded from the fix",
     )
 
+    # Black sides (ticket 64): bar_width is lifted out of ultrawide.py by itself and run here, so
+    # this is the shipped arithmetic, not a copy of it. Expected values are the hand sums
+    # (W - H*16/9) / 2: 3840-1920, 5120-2560, 3440-2560, 3840-2844.44 (rounded up), all halved.
+    uw_tree = ast.parse(ultrawide_src)
+    fn = next(
+        (n for n in uw_tree.body if isinstance(n, ast.FunctionDef) and n.name == "bar_width"),
+        None,
+    )
+    scope = {}
+    if fn is not None:
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), str(ULTRAWIDE), "exec"), scope)
+    bar_width = scope.get("bar_width")
+    for (w, h), want in {
+        (3840, 1080): 960,  # Lumi's game now, 32:9
+        (5120, 1440): 1280,  # her monitor, 32:9
+        (3440, 1440): 440,  # 21:9
+        (3840, 1600): 498,  # 24:10: 497.78, rounded up so no bright line of world is left
+        (2560, 1440): 0,  # 16:9: nothing at all
+        (1920, 1080): 0,  # 16:9
+        (1920, 1200): 0,  # 16:10, narrower than 16:9: nothing, never negative
+        (1024, 768): 0,  # 4:3
+    }.items():
+        got = bar_width(w, h) if bar_width else None
+        check(
+            f"black sides at {w}x{h} are {want} px each, leaving a centred 16:9 part",
+            got == want and (w - 2 * got >= h * 16 / 9 - 1 or want == 0),
+            f"bar_width({w}, {h}) = {got}; the middle left is {w - 2 * got if got is not None else None} px",
+        )
+
     return summary()
 
 

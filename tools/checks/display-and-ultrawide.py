@@ -34,7 +34,7 @@ for _field in FIELDS:
     except Exception as _ex:  # a build without one of these is itself worth knowing
         before[_field] = None
 
-saved_options = [(o, o.value) for o in (d.fov, d.hud_scale, d.hud_bounds, u.enabled)]
+saved_options = [(o, o.value) for o in (d.fov, d.hud_scale, d.hud_bounds, u.enabled, u.black_sides)]
 real_get_pc = mods_base.get_pc
 real_logging = d.logging
 ultrawide_hook_was_on = u.fix_menu_scaling.get_active_count()
@@ -42,7 +42,7 @@ display_on_arrival = next((f.on_arrival for f in core.all_features() if f.name =
 menu_reapply_hook_is_on = d.on_menu_reapply.get_active_count()
 
 # The seven definitions BL2-ULTRAWIDE.md:88-94 measured at SM_NoBorder on disk, plus the
-# scope, which is at SM_NoBorder too and is deliberately left there.
+# scope, which is at SM_NoBorder too and follows the black-sides switch instead (ticket 64).
 SEVEN = [
     "UI_Frontend_Legal.Frontend_Legal_Def",
     "UI_GearboxAccount.GearboxAccount_DEF",
@@ -468,11 +468,22 @@ try:
         )
 
     scopes = definition(SCOPES)
-    check(
-        "the scope is left alone, so it still fills the screen",
-        scale_mode(scopes) == SM_NO_BORDER,
-        f"{SCOPES} ScaleMode {scale_mode(scopes)} (None = not loaded)",
-    )
+    # Ticket 64: the scope is fitted like the seven while "black sides" is on, and left at
+    # SM_NoBorder while it is off. Its definition is only rewritten when the scope movie starts,
+    # which is once per map, so with no scope movie yet there is nothing to judge.
+    scope_movie = P.myHUD.WeaponScopeMovie if P.myHUD is not None else None
+    want_scope = SM_SHOW_ALL if u.black_sides.value else SM_NO_BORDER
+    if scope_movie is None:
+        skip(
+            "the scope is fitted to 16:9 while black sides are on, and left alone while off",
+            "no scope movie has started on this map yet",
+        )
+    else:
+        check(
+            "the scope is fitted to 16:9 while black sides are on, and left alone while off",
+            scale_mode(scopes) == want_scope,
+            f"{SCOPES} ScaleMode {scale_mode(scopes)}, black sides {u.black_sides.value}",
+        )
     check(
         "the scope's full name really does contain 'Scopes', which is how the hook spots it",
         scopes is not None and "Scopes" in str(scopes),
