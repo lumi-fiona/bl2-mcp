@@ -68,11 +68,11 @@ try:
         f"apply={getattr(feature, 'apply', None)}",
     )
     check(
-        "both re-apply hooks are carried: the per-spawn one and the one for getting in a vehicle",
+        "both re-apply points are carried: every map arrival and getting in a vehicle",
         feature is not None
-        and any(h is SF.on_character_live for h in feature.hooks)
+        and feature.on_arrival is SF.on_arrival
         and any(h is SF.on_driver_enter for h in feature.hooks),
-        getattr(feature, "hooks", None),
+        (getattr(feature, "on_arrival", None), getattr(feature, "hooks", None)),
     )
     check(
         "all four switches are carried to the mod menu, in order",
@@ -104,12 +104,12 @@ try:
     SF._apply_turret_speed = lambda: calls.append("turret")
     SF._apply_vehicles = lambda: calls.append("vehicles")
     try:
-        SF.on_character_live(None, None, None, None)
+        SF.on_arrival(None)
         SF.on_driver_enter(None, None, None, None)
     finally:
         SF._apply_turret_speed, SF._apply_vehicles = real_turret, real_vehicles
     check(
-        "the spawn hook re-applies the turret and the vehicle hook re-applies the vehicles",
+        "an arrival re-applies the turret and the vehicle hook re-applies the vehicles",
         calls == ["turret", "vehicles"],
         f"calls={calls}",
     )

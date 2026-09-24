@@ -18,6 +18,7 @@ import mods_base
 import unrealsdk
 from unrealsdk.hooks import Type
 
+from bl2_modern import core
 from bl2_modern.features import display as d
 from bl2_modern.features import ultrawide as u
 
@@ -37,7 +38,7 @@ saved_options = [(o, o.value) for o in (d.fov, d.hud_scale, d.hud_bounds, u.enab
 real_get_pc = mods_base.get_pc
 real_logging = d.logging
 ultrawide_hook_was_on = u.fix_menu_scaling.get_active_count()
-display_hook_is_on = d.on_character_live.get_active_count()
+display_on_arrival = next((f.on_arrival for f in core.all_features() if f.name == "Display"), None)
 menu_reapply_hook_is_on = d.on_menu_reapply.get_active_count()
 
 # The seven definitions BL2-ULTRAWIDE.md:88-94 measured at SM_NoBorder on disk, plus the
@@ -229,23 +230,23 @@ try:
     )
     d.hud_scale.value = _was_scale
 
-    # --- re-applied on every spawn ------------------------------------------------------
+    # --- re-applied on every map arrival ---------------------------------------------------
 
     check(
-        "the spawn hook that re-applies both settings is installed",
-        display_hook_is_on == 1,
-        f"{display_hook_is_on} of {len(d.on_character_live.hook_funcs)} active",
+        "every map arrival re-applies both settings (the core calls the feature's on_arrival)",
+        display_on_arrival is d.on_arrival,
+        f"Display's on_arrival is {display_on_arrival}",
     )
 
     d.fov.value = 100
     d.hud_bounds.value = 200
     P.DefaultFOV = 70.0
     P.HUDScaleE = 0.5
-    d.on_character_live(P, None, None, None)
+    d.on_arrival(P)
     check(
         "a character coming alive puts the chosen field of view back",
         float(P.DefaultFOV) == 100.0,
-        f"DefaultFOV {P.DefaultFOV} after the spawn hook ran on a controller reset to 70",
+        f"DefaultFOV {P.DefaultFOV} after an arrival ran on a controller reset to 70",
     )
     # HUD SIZE writes HUDScaleE; hud_bounds writes X and Y. This used to compare HUDScaleE
     # against the BOUNDS slider, from when the two were wired the wrong way round.

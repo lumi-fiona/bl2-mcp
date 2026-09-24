@@ -1,19 +1,22 @@
 # Community Patch - checks for the claims in AUDIT-RAW/community-patch.md
 # Run: bash bl2-mcp/tools/ask.sh bl2-mcp/tools/checks/community-patch.py
 #
-# Nothing here waits for anything. The one claim that genuinely needs a map change - that the
-# map-gated commands are DELIVERED on arrival rather than merely held - is in
-# community-patch-needs-travel.py. Claims about patch.txt, the settings file and the log are in
+# Nothing here waits for anything. Whether the game applies the hotfixes at its own moments -
+# every level load, a map's load, a package's load - is patch-lines-land.py's, read back after
+# each arrival. Claims about patch.txt, the settings file and the log are in
 # community-patch-files.py, which runs outside the game.
 #
 # Two ways this file avoids firing thousands of console commands at a live game:
 #   - the wiring checks swap core._run for a recorder, so _run_one_patch does all its real work
-#     (read the file, parse it, honour the switches, sort the hotfixes) and sends nothing;
+#     (read the file, parse it, honour the switches, sort out the hotfixes) and sends nothing,
+#     and the hotfixes it would hand to the game's service are taken back afterwards;
 #   - the "do commands land" check writes to at most ~116 numeric properties and puts every one
 #     of them back, by hand, in the finally.
 reset()
 
+import collections
 import pathlib
+import re
 
 import unrealsdk
 
@@ -40,9 +43,9 @@ controller = pc()
 text = PATCH.read_text(encoding="utf-8", errors="replace")  # 4.6 MB, measured at ~30 ms to parse
 
 # Everything the live launch produced, snapshotted before this script touches a thing.
-live_by_level = {name: list(held) for name, held in core._by_level.items()}
-live_levels = {name: len(held) for name, held in live_by_level.items()}
-live_repeat = list(core._repeat_on_level_load)
+live_hot = list(core._hotfixes)
+live_entries = core._entries
+live_levels = collections.Counter(w.lower() for w, _c in live_hot if core._kind(w) == "map")
 live_wanted = cp.wanted_sections()
 
 # --- what has to be put back ---------------------------------------------------------------
@@ -62,12 +65,17 @@ def recording_run(commands):
 
 
 def probe(sections):
-    """Run one patch through the core exactly as the pack does, with the console unplugged."""
+    """
+    Run one patch through the core exactly as the pack does, with the console unplugged.
+    Returns the plain lines it would send and the hotfixes it would hand to the game's service.
+    """
     sent.clear()
-    core._by_level.clear()
-    core._repeat_on_level_load[:] = []
-    core._run_one_patch(core.Feature(name="probe", patch_sections=lambda: sections))
-    return list(sent), {name: len(held) for name, held in core._by_level.items()}
+    at = len(core._hotfixes)
+    try:
+        core._run_one_patch(core.Feature(name="probe", patch_sections=lambda: sections))
+        return list(sent), core._hotfixes[at:]
+    finally:
+        del core._hotfixes[at:]
 
 
 try:
@@ -178,47 +186,36 @@ try:
         _, _hot, _ = _commands_from(
             _path.read_text(encoding="utf-8", errors="replace"), _wanted,
         )
-        _expected += len([1 for _lvl, _c in _hot if _lvl not in ("None", "")])
+        _expected += len([1 for _lvl, _c in _hot if core._kind(_lvl) == "map"])
     check(
         "every command the patch files gate on a map is being held for that map, and no others",
         sum(live_levels.values()) == _expected,
         f"{sum(live_levels.values())} held, {_expected} gated across "
         f"{len(live_levels)} maps in the files the pack is actually running",
     )
-    mixed_case = [name for name in live_levels if name != name.lower()]
+    # The patch spells this map two ways, and the read-back matches a map without regard to case,
+    # so both spellings count as that map's. community-patch-files.py checks both are in the file.
+    # At least five: another text mod naming the same map adds more, which is not a failure.
+    _spellings = {w for w, _c in live_hot if core._kind(w) == "map" and w.lower() == "backburner_p"}
+    _judged_there = [w for w, _c in core.in_effect(object(), "backburner_p") if core._kind(w) == "map"]
     check(
-        "every map the patch is filed under is stored in lower case",
-        not mixed_case,
-        f"stored with capitals: {mixed_case}",
-    )
-    # The patch spells this map two ways. Five commands land under one key only because the core
-    # lower-cases; a case-sensitive dict would give two keys and the watcher would match at most
-    # one of them. community-patch-files.py checks both spellings really are in the file.
-    # The audit says this key holds 4 commands. Measured 2026-08-19 against the shipped file: 5.
-    # At least five: the Community Patch spells the map two ways and the core lower-cases both,
-    # so all of them land under one key. Another text mod naming the same map adds more, which
-    # is not a failure - what would be is fewer than the Community Patch alone puts there.
-    check(
-        "both spellings of BackBurner_P end up filed under the one lower-case name",
-        (live_levels.get("backburner_p") or 0) >= 5,
-        f"backburner_p holds {live_levels.get('backburner_p')} commands",
+        "both spellings of BackBurner_P are that map's, however the patch spells them",
+        live_levels.get("backburner_p", 0) >= 5 and len(_spellings) == 2 and bool(_judged_there),
+        f"backburner_p has {live_levels.get('backburner_p')} hotfixes spelled {sorted(_spellings)}; "
+        f"{len(_judged_there)} of them in effect there once superseded ones are left out",
     )
 
-    here = core._current_map(controller)
-    check(
-        "the map watcher has already matched the map you are standing in",
-        here is not None and core._map_done == here,
-        f"_map_done={core._map_done!r}, the map reads as {here!r}, where() says {where()!r}",
-    )
-    # This one PASSES because the bug is present, and it is written that way on purpose: if the
-    # diagnostic is ever fixed to speak once per map, this check turns red and that is the good
-    # news. _logged_map_name latches on the first sample of the session, which the log shows is
-    # 'menumap' - so the one line guarding 483 map-gated commands reports on the main menu.
-    check(
-        "the once-per-launch map-name diagnostic is spent and can never report on a real map",
-        core._logged_map_name is True,
-        f"_logged_map_name={core._logged_map_name}, and you are in {here!r}",
-    )
+    here = where().lower()
+    _log = pathlib.Path(core.__file__).parents[2] / "Binaries" / "Win32" / "Plugins" / "unrealsdk.log"
+    _arrived = re.findall(r"Second Wind: arrived in (\S+);", _log.read_text(encoding="utf-8", errors="replace"))
+    if here == "menumap":
+        print("   (the last-arrival claim needs a map; at the main menu nothing has arrived)")
+    else:
+        check(
+            "the last arrival the core reported is the map you are standing in",
+            bool(_arrived) and _arrived[-1] == here,
+            f"last arrival {_arrived[-1] if _arrived else None!r}, you are in {here!r}",
+        )
 
     # --- claim 13, the half of it that is not "does it look right on screen" ---------------
     states = []
@@ -245,7 +242,7 @@ try:
     core._run = recording_run
 
     cp.enabled.value = False
-    off_sent, off_levels = probe(cp.wanted_sections())
+    off_sent, off_hot = probe(cp.wanted_sections())
     cp.enabled.value = saved_master
     check(
         "with the master switch off the pack sends no commands at all",
@@ -253,42 +250,46 @@ try:
         f"{len(off_sent)} commands sent",
     )
     check(
-        "with the master switch off nothing is held back for any map either",
-        not off_levels,
-        f"{sum(off_levels.values())} commands held for {len(off_levels)} maps",
+        "with the master switch off no hotfix goes to the game's service either",
+        not off_hot,
+        f"{len(off_hot)} hotfixes handed over",
     )
 
-    ticked_sent, _ = probe(cp.wanted_sections())
-    probe_repeat = list(core._repeat_on_level_load)
+    ticked_sent, ticked_hot = probe(cp.wanted_sections())
     cp._section_options["Cosmetic Changes"].value = False
-    fewer_sent, _ = probe(cp.wanted_sections())
+    fewer_sent, fewer_hot = probe(cp.wanted_sections())
     cp._section_options["Cosmetic Changes"].value = saved_switches["Cosmetic Changes"]
+    _on = len(ticked_sent) + len(ticked_hot)
+    _off = len(fewer_sent) + len(fewer_hot)
     check(
-        "unticking Reskins removes exactly its 1119 commands from what gets sent",
-        len(ticked_sent) - len(fewer_sent) == 1119,
-        f"{len(ticked_sent)} sent with it on, {len(fewer_sent)} with it off",
+        "unticking Reskins removes exactly its 1119 lines from what gets run or handed over",
+        _on - _off == 1119,
+        f"{_on} with it on, {_off} with it off",
     )
+    _all_on = set(ticked_sent) | {c for _w, c in ticked_hot}
+    _all_off = set(fewer_sent) | {c for _w, c in fewer_hot}
     check(
         "an unticked section takes nothing else with it",
-        len(fewer_sent) > 0 and set(fewer_sent) < set(ticked_sent),
-        f"{len(set(ticked_sent) - set(fewer_sent))} commands dropped, {len(fewer_sent)} kept",
+        len(_all_off) > 0 and _all_off < _all_on,
+        f"{len(_all_on - _all_off)} lines dropped, {len(_all_off)} kept",
     )
-    # The pack asks the switches at the moment it runs, not at import - so what it actually put on
-    # the level-load list at the main menu must still be what today's switches ask for. The
-    # Community Patch registers before Extras, so its share is the front of the live list.
+    # The pack asks the switches at the moment it runs, not at import - so what it handed to the
+    # game's service at the main menu must still be what today's switches ask for. The Community
+    # Patch registers before Extras, so its share is the front of the live list.
     check(
-        "the commands the pack repeats on every level load are the ones today's switches ask for",
-        len(probe_repeat) > 0 and live_repeat[: len(probe_repeat)] == probe_repeat,
-        f"the launch put {len(live_repeat)} commands on the level-load list; today's switches want"
-        f" {len(probe_repeat)} of them from the Community Patch",
+        "the hotfixes the pack handed to the game's service are the ones today's switches ask for",
+        len(ticked_hot) > 0 and live_hot[: len(ticked_hot)] == ticked_hot,
+        f"the launch handed over {len(live_hot)} hotfixes; today's switches want"
+        f" {len(ticked_hot)} of them from the Community Patch",
     )
 
     sent.clear()
+    _held = len(core._hotfixes)
     core.run_bundled_patch()
     check(
         "asking the pack to apply the patch a second time does nothing",
-        not sent,
-        f"{len(sent)} commands sent on a second call to run_bundled_patch()",
+        not sent and len(core._hotfixes) == _held,
+        f"{len(sent)} commands sent, {len(core._hotfixes) - _held} hotfixes added on a second call",
     )
     check(
         "the pack has recorded that both the patch and the main menu already happened",
@@ -397,9 +398,8 @@ finally:
     cp.enabled.value = saved_master
     for name, value in saved_switches.items():
         all_switches[name].value = value
-    core._by_level.clear()
-    core._by_level.update({name: list(held) for name, held in live_by_level.items()})
-    core._repeat_on_level_load[:] = live_repeat
+    core._hotfixes[:] = live_hot
+    core._entries = live_entries
     for path, prop, original in touched:
         try:
             controller.ConsoleCommand(f"set {path} {prop} {original}")

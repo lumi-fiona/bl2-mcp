@@ -62,8 +62,8 @@ try:
     )
     check(
         "it listens for map arrivals",
-        any(cb is TM._on_map_arrived for cb in core.on_map_arrived),
-        f"{len(core.on_map_arrived)} arrival listeners registered",
+        feature is not None and feature.on_arrival is TM.on_arrival,
+        getattr(feature, "on_arrival", None),
     )
 
     # --- the flag that wipes instead of adding -----------------------------------------------

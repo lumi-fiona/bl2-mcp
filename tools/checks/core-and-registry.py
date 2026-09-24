@@ -89,9 +89,9 @@ try:
 
     _hooks = core.all_hooks()
     check(
-        "the core's own three hooks lead the hook list, without which the patch never runs",
-        [_hooks[0], _hooks[1], _hooks[2]]
-        == [core.on_main_menu, core.on_character_live, core.on_tick],
+        "the core's own four hooks lead the hook list, without which the patch never runs",
+        _hooks[:4]
+        == [core.on_main_menu, core.on_loading_done, core.on_character_live, core.on_services_replaced],
         f"{len(_hooks)} hooks in total",
     )
     check(
@@ -172,30 +172,24 @@ try:
         core._patch_has_run and core._main_menu_done,
         f"_patch_has_run={core._patch_has_run}, _main_menu_done={core._main_menu_done}",
     )
-    _before = (len(core._repeat_on_level_load), sum(len(v) for v in core._by_level.values()))
+    _before = len(core._hotfixes)
     core.run_bundled_patch()   # must be a no-op the second time, or every list doubles
-    _after = (len(core._repeat_on_level_load), sum(len(v) for v in core._by_level.values()))
+    _after = len(core._hotfixes)
     check(
         "asking for the bundled patch a second time does nothing at all",
         _before == _after,
         f"{_before} before, {_after} after",
     )
 
-    _repeat = core._repeat_on_level_load
+    _hot = core._hotfixes
     check(
-        "hotfix commands were kept so they can be re-run on every level load",
-        len(_repeat) > 0
-        and all(c.split()[0].lower() in ("set", "set_cmp") for c in _repeat if c.split()),
-        f"{len(_repeat)} commands repeat on each level load",
+        "the hotfixes were kept for the game's own hotfix service, every one a set line",
+        len(_hot) > 0 and all(c.split()[0].lower() == "set" for _w, c in _hot if c.split()),
+        f"{len(_hot)} hotfixes",
     )
 
-    # The audit says "assert core._by_level has 483 keys (479 + 4)". It has neither: 483 is a
-    # count of COMMANDS, they are grouped one bucket per map name, and the totals move the
-    # moment a patch section is unticked - the travel stress run has the Community Patch off
-    # entirely, which leaves 4 held commands and not 483. So nothing here is hard-coded: the
-    # numbers the patch runner announced to the log are compared against what it is still
-    # holding, which is the thing that must never disagree whatever is switched on.
-    _held = sum(len(v) for v in core._by_level.values())
+    # Nothing hard-coded: the totals move the moment a patch section is unticked. The numbers the
+    # patch runner announced to the log are compared against what it is still holding.
     _log = Path(core.__file__).parents[2] / "Binaries" / "Win32" / "Plugins" / "unrealsdk.log"
     try:
         _log_lines = _log.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -203,51 +197,105 @@ try:
         _log_lines = []
     _announced = [
         re.search(
-            r"Second Wind: (.+?) applied, (\d+) commands run, (\d+) failed, (\d+) of them "
-            r"repeating on each level load, (\d+) held for particular maps",
+            r"Second Wind: (.+?) applied, \d+ commands run, \d+ failed; read back, \d+ landed and "
+            r"\d+ are not loaded yet\. (\d+) hotfixes for the game's hotfix service: (\d+) for every "
+            r"level load, (\d+) for particular maps, (\d+) for particular packages",
             line,
         )
         for line in _log_lines
     ]
-    _announced = [m for m in _announced if m]
-    # "probe" is not one of this pack's own features - it is the name community-patch.py:64-70
-    # gives a throwaway Feature so it can drive _run_one_patch directly while testing the
-    # Community Patch's own switches, outside the FEATURES list entirely. That logs through the
-    # exact same line a real feature does, so a log with several test runs behind it carries
-    # several "Second Wind: probe applied, ..." lines that have nothing to do with what is
-    # actually held right now. Excluded so this compares memory against the pack's own
-    # announcements, not against the check suite's.
-    _announced = [m for m in _announced if m.group(1) != "probe"]
+    # "probe" is the throwaway Feature community-patch.py drives _run_one_patch with; its log
+    # lines say nothing about what the pack itself holds.
+    _announced = [m for m in _announced if m and m.group(1) != "probe"]
+    _kinds = {k: sum(1 for w, _c in _hot if core._kind(w) == k) for k in ("everywhere", "map", "package")}
     check(
         "what the patch runner is still holding is exactly what it told the log it had kept",
         bool(_announced)
-        and sum(int(m.group(4)) for m in _announced) == len(_repeat)
-        and sum(int(m.group(5)) for m in _announced) == _held,
-        f"log: {sum(int(m.group(4)) for m in _announced)} repeating, "
-        f"{sum(int(m.group(5)) for m in _announced)} held, from "
-        f"{[m.group(1) for m in _announced]}; memory: {len(_repeat)} repeating, {_held} held"
+        and sum(int(m.group(2)) for m in _announced) == len(_hot)
+        and [sum(int(m.group(i)) for m in _announced) for i in (3, 4, 5)]
+        == [_kinds["everywhere"], _kinds["map"], _kinds["package"]],
+        f"log: {[m.group(1) for m in _announced]} "
+        f"{[sum(int(m.group(i)) for m in _announced) for i in (2, 3, 4, 5)]}; memory: "
+        f"{len(_hot)} = {_kinds}"
         if _announced
         else f"no patch line in {_log} - was it deleted since the launch?",
     )
+
+    # --- the game's own hotfix service holds them (ticket 52) -------------------------------
+    _keys, _values = core._entries or ([], [])
+    _service = core._hotfix_service()
+    _live_keys = list(_service.Keys) if _service is not None else []
+    _at = _live_keys.index(_keys[0]) if _keys and _keys[0] in _live_keys else -1
     check(
-        "every held map name is lower case and non-empty, so BackBurner_P and Backburner_P are the same map",
-        all(k and k == k.lower() and k not in ("none", "") for k in core._by_level)
-        and all(v for v in core._by_level.values()),
-        f"{len(core._by_level)} maps holding {_held} commands, first few "
-        f"{sorted(core._by_level)[:5]}",
+        "every hotfix is in the game's own hotfix service, after Gearbox's own and in the pack's order",
+        _service is not None
+        and str(_service.ServiceName) == core.MICROPATCH
+        and len(_keys) == len(_hot)
+        and _at >= 0
+        and _live_keys[_at : _at + len(_keys)] == _keys
+        and list(_service.Values)[_at : _at + len(_values)] == _values
+        and len(_service.Keys) == len(_service.Values),
+        f"{_service}: {len(_live_keys)} keys, the pack's {len(_keys)} start at {_at}",
+    )
+
+    def _first_field(when):
+        kind = core._kind(when)
+        if kind == "everywhere":
+            return ""
+        return when[len(core.PACKAGE):] if kind == "package" else when
+
+    check(
+        "each entry is the kind the game applies at that hotfix's moment: a package's on demand, the rest on a level load",
+        all(
+            k.startswith("SparkOnDemandPatchEntry-") == (core._kind(w) == "package")
+            and v.split(",", 1)[0] == _first_field(w)
+            and v.split(",", 3)[1:3] == c.split(None, 3)[1:3]
+            for (w, c), k, v in zip(_hot, _keys, _values)
+        ),
+        f"{len(_keys)} entries; first three {[v[:60] for v in _values[:3]]}",
+    )
+
+    # --- one arrival per map load (ticket 05) -------------------------------------------------
+    # The core's two arrival hooks driven with stand-ins: a finished map with no character yet
+    # (New Game) waits for the spawn, a finished map with one (every travel, Continue) arrives at
+    # once, a spawn with nothing waiting is not an arrival, and another player's controller is
+    # nobody's arrival here. _arrive is swapped for a recorder so nothing reaches the game.
+    class _Ctl:
+        def __init__(self, address, pawn):
+            self._address, self.Pawn = address, pawn
+
+        def _get_address(self):
+            return self._address
+
+    _me, _other = _Ctl(1, None), _Ctl(2, "pawn")
+    _arrivals = []
+    _real_arrive = core._arrive
+    core._arrive = lambda pc: _arrivals.append(pc._address)
+    core.get_pc = lambda: _me
+    try:
+        core._arrival_pending = False
+        core.on_loading_done(_me, None, None, None)          # New Game: map done, no character
+        _waited = (list(_arrivals), core._arrival_pending)
+        core.on_character_live(_me, None, None, None)        # ...the character spawns
+        _new_game = list(_arrivals)
+        _me.Pawn = "pawn"
+        core.on_loading_done(_me, None, None, None)          # a fast travel
+        core.on_character_live(_me, None, None, None)        # a spawn nothing waits for
+        core.on_loading_done(_other, None, None, None)       # the host sees a partner's load
+        _later = list(_arrivals)
+    finally:
+        core._arrive = _real_arrive
+        core.get_pc = _real_get_pc
+        core._arrival_pending = False
+    check(
+        "a map that finishes before the character spawns arrives at the spawn, once",
+        _waited == ([], True) and _new_game == [1],
+        f"after the load {_waited}, after the spawn {_new_game}",
     )
     check(
-        "no map's commands leaked into the run-everywhere list",
-        not (set(_repeat) & {c for v in core._by_level.values() for c in v}),
-        f"overlap: {len(set(_repeat) & {c for v in core._by_level.values() for c in v})}",
-    )
-    # Bug pin, and it passes while the bug is present. _logged_map_name is a single bool, so the
-    # one report it is allowed burns on "menumap" at startup and no real map can ever be
-    # reported afterwards. The suggested fix is a set of names; this check fails the day it lands.
-    check(
-        "the map-name report is still a one-shot bool, so only the first map ever seen is reported",
-        core._logged_map_name is True and isinstance(core._logged_map_name, bool),
-        "burned on menumap at startup - see core.py:366-381",
+        "a map that finishes with the character there arrives at once, and nothing else is an arrival",
+        _later == [1, 1],
+        f"arrivals {_later}",
     )
 
     # --- one bad line cannot stop the rest --------------------------------------------------
@@ -275,7 +323,7 @@ try:
     )
 
     # The other half of the same claim, and it does NOT hold: get_pc is called outside the
-    # per-command try (core.py:305), so no controller means no commands at all rather than
+    # per-command try (core._run), so no controller means no commands at all rather than
     # one failure. This check passes while that is true.
     def _no_controller():
         raise IndexError("no local player yet")
@@ -289,7 +337,7 @@ try:
     check(
         "but with no player controller the whole batch dies as one, because get_pc sits outside the try",
         _escaped,
-        "core.py:305 - on the level-load path this exception escapes into the spawn hook",
+        "core._run - at the main menu this exception escapes into on_main_menu",
     )
     core.get_pc = _real_get_pc
 

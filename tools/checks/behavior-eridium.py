@@ -45,9 +45,9 @@ try:
         f"default is {ER.mode.default_value!r}",
     )
     check(
-        "the per-map hook is carried to the core",
-        feature is not None and any(h is ER.on_character_live for h in feature.hooks),
-        getattr(feature, "hooks", None),
+        "the per-map arrival is carried to the core",
+        feature is not None and feature.on_arrival is ER.on_arrival,
+        getattr(feature, "on_arrival", None),
     )
     check(
         "moving the spinner applies it straight away",
@@ -172,7 +172,7 @@ try:
         # that gate on purpose because the flag reads as purely local. A NetMode of 3 (a
         # machine that joined someone else's game) must NOT stop this hook from writing.
         ER._apply(playthrough=0)  # known state: off, before driving the hook
-        ER.on_character_live(_FakeController(2, net_mode=3), None, None, None)
+        ER.on_arrival(_FakeController(2, net_mode=3))
         check(
             "the per-map hook writes even for a controller that looks like a joined client - "
             "this feature deliberately has no host/client guard at all",
@@ -226,7 +226,7 @@ try:
         marked = {str(o.Name): bool(o.bAutomaticallyPickup) for o in objects}
         ER._apply(playthrough=2)
         ER._apply(playthrough=None)
-        ER.on_character_live(_FakeController(2), None, None, None)
+        ER.on_arrival(_FakeController(2))
         check(
             "and then it writes nothing at all, whatever runs - the field is the other mod's",
             all(bool(o.bAutomaticallyPickup) == marked[str(o.Name)] for o in objects),

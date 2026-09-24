@@ -60,9 +60,9 @@ try:
         [getattr(o, "identifier", o) for o in getattr(feature, "options", [])],
     )
     check(
-        "the spawn hook is carried too, so the menu can switch it off",
-        feature is not None and any(h is R.on_character_live for h in feature.hooks),
-        getattr(feature, "hooks", None),
+        "the per-map arrival is carried too",
+        feature is not None and feature.on_arrival is R.on_arrival,
+        getattr(feature, "on_arrival", None),
     )
     check(
         "changing any of the three dials writes the new number straight away",

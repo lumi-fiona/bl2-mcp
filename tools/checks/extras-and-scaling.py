@@ -177,8 +177,8 @@ try:
     # with no chests (GD_Balance_Treasure, Anim_Lootables). There is no subset of these safe
     # to demand from an arbitrary map the way the character skills above are.
     #
-    # What core.py actually promises a level=None hotfix is not "resolves from here" - it is
-    # "gets resent on every level load, forever" (on_character_live, core.py:320-343), reaching
+    # What a level=None hotfix is promised is not "resolves from here" - it is "applied by the
+    # game's own hotfix service on every level load, forever" (core.py, ticket 52), reaching
     # whichever map happens to have the matching content loaded, same as a map-gated hotfix
     # reaches its one named map. A single map can only ever show a slice of that. The honest
     # thing to assert from one map is that the pipeline reaches SOME real objects (not zero -
@@ -209,16 +209,16 @@ try:
         print(f"   ({len(UNKNOWN)} targets set something this file cannot compare - empty lists "
               f"and structs, mostly from Auto Sprint: {UNKNOWN[:2]})")
 
-    # The audit's version of this asserts len(core._by_level['ice_p']) == 3, which is wrong:
-    # the Community Patch runs first (features/__init__.py:22-26) and puts its own Ice_P and
-    # SouthernShelf_P commands into the same lists. Membership is the honest test.
-    held = [(lvl, c) for lvl, c in GATED if c in core._by_level.get(lvl, [])]
+    # Membership, not a count: the Community Patch runs first (features/__init__.py) and hands
+    # over its own Ice_P and SouthernShelf_P hotfixes too.
+    handed = {(w.lower(), c) for w, c in core._hotfixes if core._kind(w) == "map"}
+    held = [(lvl, c) for lvl, c in GATED if (lvl, c) in handed]
     check(
-        "every map-gated extras command was held for its map instead of being thrown away",
+        "every map-gated extras command was handed to the game's service for its map instead of being thrown away",
         len(GATED) > 0 and len(held) == len(GATED),
-        f"{len(held)} of {len(GATED)} held; core._by_level carries "
-        f"{len(core._by_level.get('ice_p', []))} commands for ice_p and "
-        f"{len(core._by_level.get('southernshelf_p', []))} for southernshelf_p in total",
+        f"{len(held)} of {len(GATED)} handed over; the pack holds "
+        f"{sum(1 for m, _c in handed if m == 'ice_p')} for ice_p and "
+        f"{sum(1 for m, _c in handed if m == 'southernshelf_p')} for southernshelf_p in total",
     )
 
     # Claim 5. The audit says to assert the property is 0.0. It is neither a float nor zero:
@@ -239,11 +239,15 @@ try:
     have = penalty is not None
     multiplier = float(penalty.ValueFormula.Multiplier.BaseValueConstant) if have else -1
     penalty_on = bool(penalty.ValueFormula.bEnabled) if have else False
+    # Only while its switch is on: Lumi's picks have it off (ticket 07), and then the game's own
+    # 7% stands.
+    cheaper = "Cheaper dying" in WANTED
     check(
-        "cheaper dying sets the death penalty to 1% of the money you are carrying",
-        abs(multiplier - 0.01) < 1e-6 and penalty_on,
-        f"Multiplier.BaseValueConstant = {multiplier!r}, bEnabled = {penalty_on}. The money "
-        "actually taken on death is measured in extras-and-scaling-needs-travel.py",
+        "cheaper dying sets the death penalty to 1% of the money you are carrying, and off leaves the game's 7%",
+        abs(multiplier - (0.01 if cheaper else 0.07)) < 1e-6 and (penalty_on or not cheaper),
+        f"switch {'on' if cheaper else 'off'}: Multiplier.BaseValueConstant = {multiplier!r}, "
+        f"bEnabled = {penalty_on}. The money actually taken on death is measured in "
+        "extras-and-scaling-needs-travel.py",
     )
 
     check(
@@ -266,8 +270,8 @@ try:
         f"option is {SAVED_HIDE}",
     )
 
-    # Claim 8, written to fail. The description at extras.py:43 promises immediate effect and
-    # the only writer is the SpawningProcessComplete hook at extras.py:53-64.
+    # Claim 8. The description promises immediate effect; the option's own callback writes it,
+    # besides every map arrival (extras.on_arrival).
     before = bool(pc().bShowUndiscoveredMissions)
     E.hide_missions.value = not SAVED_HIDE
     after = bool(pc().bShowUndiscoveredMissions)
@@ -276,7 +280,7 @@ try:
         "toggling 'Hide undiscovered missions' takes effect immediately, as its description says",
         after != before,
         f"the flag stayed {before} while the option went {SAVED_HIDE} -> {not SAVED_HIDE}; "
-        "nothing writes it until the next SpawningProcessComplete",
+        "nothing writes it until the next map arrival",
     )
     # INVERTED 2026-08-20. This used to assert that NEITHER callback was wired, which was true
     # when it was written and is the bug the check above exists to catch. One of them is wired

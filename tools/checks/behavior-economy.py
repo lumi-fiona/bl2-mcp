@@ -83,11 +83,11 @@ try:
         f"apply={getattr(feature, 'apply', None)}",
     )
     check(
-        "the per-map and per-restock hooks are both carried to the core",
+        "the per-map arrival and the per-restock hook are both carried to the core",
         feature is not None
-        and any(h is E.on_character_live for h in feature.hooks)
+        and feature.on_arrival is E.on_arrival
         and any(h is E.on_vending_generate for h in feature.hooks),
-        getattr(feature, "hooks", None),
+        (getattr(feature, "on_arrival", None), getattr(feature, "hooks", None)),
     )
     check(
         "changing either switch writes it straight away",
@@ -170,11 +170,15 @@ try:
         E.cheaper_sdus.value = False
         E._apply_cheaper_sdus()
         restored = [float(e.EridiumCostForUpgrade) for e in sdu_obj.AdditionalBackpackSDUUpgrades]
+        # With the switch on at launch the pack wrote before this file arrived, so what this file
+        # found is the pack's own number; what was really there is what the pack read first.
+        truth = E._vanilla_sdu_prices or sdu_before
         check(
-            "turning the switch back off restores the prices this file found on arrival, not "
-            "the game's textbook 50/100/150/200 - whatever was really there",
-            [round(v, 3) for v in restored] == [round(v, 3) for v in sdu_before],
-            f"AdditionalBackpackSDUUpgrades = {restored}, arrival was {sdu_before}",
+            "turning the switch back off restores the prices that were there before the pack first "
+            "wrote, not the game's textbook 50/100/150/200 - whatever was really there",
+            [round(v, 3) for v in restored] == [round(v, 3) for v in truth],
+            f"AdditionalBackpackSDUUpgrades = {restored}, before the pack wrote {truth}, "
+            f"this file found {sdu_before}",
         )
         if slots_obj is not None:
             check(
@@ -209,10 +213,12 @@ try:
 
         E.vendor_prices.value = False
         E._apply_vendor_prices(playthrough=0)
+        truth = E._vanilla.get(E._SIMPLE_SCALED[2][0], health_before)
         check(
-            "turning the switch off restores the health-vial price this file found on arrival",
-            abs(float(health_obj.ConstantValue) - health_before) < 1e-6,
-            f"ConstantValue = {health_obj.ConstantValue}, arrival was {health_before}",
+            "turning the switch off restores the health-vial price there before the pack first wrote",
+            abs(float(health_obj.ConstantValue) - truth) < 1e-6,
+            f"ConstantValue = {health_obj.ConstantValue}, before the pack wrote {truth}, "
+            f"this file found {health_before}",
         )
 
     # --- the discovered "5 ammo types", the riskiest guess in this file ---------------------
@@ -344,12 +350,12 @@ try:
     if health_obj is not None:
         E.vendor_prices.value = True
         setattr(health_obj, "ConstantValue", health_before)  # known state before the guard test
-        E.on_character_live(FakeClient(), None, None, None)
+        E.on_arrival(FakeClient())
         check(
             "the per-map hook does not write anything for a machine that joined someone else's "
             "game - the host owns vendor prices",
             abs(float(health_obj.ConstantValue) - health_before) < 1e-6,
-            f"ConstantValue = {health_obj.ConstantValue} after the spawn hook ran as a client, "
+            f"ConstantValue = {health_obj.ConstantValue} after the arrival ran as a client, "
             f"arrival was {health_before}",
         )
 

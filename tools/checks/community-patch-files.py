@@ -22,7 +22,7 @@ LOG = GAME / "Binaries" / "Win32" / "Plugins" / "unrealsdk.log"
 
 sys.path.insert(0, str(MOD))
 
-from patchfile import commands_from, sections_in  # noqa: E402
+from patchfile import PACKAGE, commands_from, section_of, sections_in  # noqa: E402
 from patchsections import EXPECTED_COUNTS, EXTRAS, NOT_A_SWITCH, SECTIONS, all_names  # noqa: E402
 
 RESULTS = []
@@ -65,12 +65,114 @@ def targets(text, wanted):
     return pairs
 
 
+def kind(when):
+    if when.startswith(PACKAGE):
+        return "package"
+    return "everywhere" if when in ("None", "") else "map"
+
+
 def sizes(text, wanted):
-    """(sent at the main menu, held for particular maps) for one set of sections."""
+    """(plain lines run at the main menu, hotfixes by kind) for one set of sections."""
     commands, hotfixes, _ignored = commands_from(text, wanted)
-    everywhere = [c for lvl, c in hotfixes if lvl in ("None", "")]
-    held = [c for lvl, c in hotfixes if lvl not in ("None", "")]
-    return len(commands) + len(everywhere), len(held)
+    kinds = {k: sum(1 for w, _c in hotfixes if kind(w) == k) for k in ("everywhere", "map", "package")}
+    return len(commands), len(hotfixes), kinds
+
+
+def entry(when, command):
+    """A hotfix the way BLCMM hands it to the game: (entry type, `when,object,property,,value`)."""
+    pieces = command.split(None, 3)
+    value = pieces[3] if len(pieces) > 3 else ""
+    if kind(when) == "package":
+        return "SparkOnDemandPatchEntry", f"{when[len(PACKAGE):]},{pieces[1]},{pieces[2]},,{value}"
+    first = "" if kind(when) == "everywhere" else when
+    return "SparkLevelPatchEntry", f"{first},{pieces[1]},{pieces[2]},,{value}"
+
+
+def blcmm_compile(text):
+    """
+    What BLCMM itself compiled from this file, which patch.txt carries after </BLCMM>: its plain
+    set lines, and its hotfix entries as (type, value) - Gearbox's own GBX_ ones left out.
+    """
+    tail = text.split("</BLCMM>", 1)[1].splitlines()
+    plain, keys, values = [], [], []
+
+    def strings(line):
+        body = line[line.index("(") + 1 : line.rindex(")")]
+        out, i = [], 0
+        while i < len(body):
+            if body[i] != '"':
+                i += 1
+                continue
+            j, buf = i + 1, ""
+            while j < len(body) and body[j] != '"':
+                if body[j] == "\\" and j + 1 < len(body):
+                    buf += body[j + 1]
+                    j += 2
+                    continue
+                buf += body[j]
+                j += 1
+            out.append(buf)
+            i = j + 1
+        return out
+
+    for line in tail:
+        line = line.strip()
+        if line.startswith("set Transient.SparkServiceConfiguration_0 Keys "):
+            keys = strings(line)
+        elif line.startswith("set Transient.SparkServiceConfiguration_0 Values "):
+            values = strings(line)
+        elif line.startswith("set ") and not line.startswith("set Transient."):
+            plain.append(line)
+    hotfixes = [(k.split("-", 1)[0], v) for k, v in zip(keys, values) if "GBX" not in k.upper()]
+    return plain, hotfixes, len(keys), len(values)
+
+
+def skipped_by_blcmm(text, wanted):
+    """
+    Counted apart from commands_from, on purpose: the lines of the wanted sections that BLCMM
+    would not run either - a line a shipped-on section ships off, and the second and later
+    options of a choose-one (MUT) group inside an opt-in extra (BLCMM ticks only the first).
+    """
+    category = re.compile(r'<category name="((?:[^"\\]|\\.)*)"([^>]*)>')
+    lines = text.split("</BLCMM>", 1)[0].splitlines()
+    on_sections, path = set(), []
+    for raw in lines:
+        line = raw.strip()
+        found = category.search(line)
+        if found:
+            path.append(found.group(1))
+        if "</category>" in line and path:
+            path.pop()
+        if not found and line.startswith("<code") and 'profiles="default' in line:
+            on_sections.add(section_of(path))
+    skipped, path, stack = 0, [], []
+    for raw in lines:
+        line = raw.strip()
+        found = category.search(line)
+        if found:
+            path.append(found.group(1))
+            parent = stack[-1] if stack else None
+            if parent and parent["mut"]:
+                parent["options"] += 1
+            out = bool(parent) and (parent["out"] or (parent["mut"] and parent["options"] > 1))
+            stack.append({"mut": 'MUT="true"' in found.group(2), "options": 0, "out": out})
+        if "</category>" in line and path:
+            path.pop()
+            stack.pop()
+        if found or not line.startswith("<code"):
+            continue
+        parent = stack[-1] if stack else None
+        if parent and parent["mut"]:
+            parent["options"] += 1
+        out = bool(parent) and (parent["out"] or (parent["mut"] and parent["options"] > 1))
+        section = section_of(path)
+        if section not in wanted:
+            continue
+        if section in on_sections:
+            skipped += 'profiles="default' not in line
+        else:
+            skipped += out
+    return skipped
 
 
 def main():
@@ -111,11 +213,32 @@ def main():
     )
 
     # --- claim 5: how much runs -----------------------------------------------------------
-    sent, held = sizes(patch, defaults)
+    plain, hot, kinds = sizes(patch, defaults)
     check(
-        "at the documented defaults the patch sends 3669 commands and holds 370 for maps",
-        (sent, held) == (3669, 370),
-        f"{sent} sent, {held} held",
+        "at the patch's own defaults the pack runs 1907 plain lines and hands the game 2131 hotfixes",
+        (plain, hot, kinds) == (1907, 2131, {"everywhere": 1439, "map": 370, "package": 322}),
+        f"{plain} plain, {hot} hotfixes {kinds} (measured on Community Patch 5.0.4, 2026-09-24)",
+    )
+
+    # BLCMM's own compile of this file is at its end, and it is what a real player's game runs.
+    # With the patch's own defaults the pack must hand the game exactly that: the same plain
+    # lines, and the same hotfix entries, type and text, in the form the game's service reads.
+    tail_plain, tail_hot, n_keys, n_values = blcmm_compile(patch)
+    ours_plain, ours_hot, _i = commands_from(patch, None)
+    ours_entries = [entry(w, c) for w, c in ours_hot]
+    check(
+        "at the patch's defaults the pack runs exactly the plain lines BLCMM compiles",
+        n_keys == n_values and sorted(ours_plain) == sorted(tail_plain),
+        f"{len(ours_plain)} ours, {len(tail_plain)} BLCMM's; only ours "
+        f"{sorted(set(ours_plain) - set(tail_plain))[:2]}, only BLCMM's "
+        f"{sorted(set(tail_plain) - set(ours_plain))[:2]}",
+    )
+    check(
+        "and hands the game exactly the hotfix entries BLCMM compiles, Gearbox's own aside",
+        sorted(ours_entries) == sorted(tail_hot),
+        f"{len(ours_entries)} ours, {len(tail_hot)} BLCMM's (of {n_keys}); only ours "
+        f"{sorted(set(ours_entries) - set(tail_hot))[:2]}, only BLCMM's "
+        f"{sorted(set(tail_hot) - set(ours_entries))[:2]}",
     )
     # This used to compare against a frozen (sent, held) pair, which went stale the moment
     # Lumi ticked or unticked anything in the menu - the number described one day's settings,
@@ -125,25 +248,26 @@ def main():
     # each section's true size through a completely different code path (sections_in, not
     # commands_from) - summing it over on_disk is an independent way to the same total, not
     # the same number typed twice.
-    sent_live, held_live = sizes(patch, on_disk)
+    plain_live, hot_live, _kinds_live = sizes(patch, on_disk)
     expected_live = sum(EXPECTED_COUNTS.get(name, 0) for name in on_disk)
+    skipped_live = skipped_by_blcmm(patch, on_disk)
     check(
-        "the settings saved on this machine send exactly as many commands as those sections hold",
-        sent_live + held_live == expected_live,
-        f"{sent_live} sent, {held_live} held ({sent_live + held_live} total) from"
-        f" {len(on_disk)} ticked sections; those sections hold {expected_live} commands in"
-        " patch.txt",
+        "the settings saved on this machine run every line of those sections BLCMM would run, none twice",
+        plain_live + hot_live + skipped_live == expected_live,
+        f"{plain_live} plain + {hot_live} hotfixes + {skipped_live} BLCMM would not run = "
+        f"{plain_live + hot_live + skipped_live}; the {len(on_disk)} ticked sections hold "
+        f"{expected_live} lines in patch.txt",
     )
 
     # --- claim 6: the map-gated share -----------------------------------------------------
     _commands, hotfixes, _ignored = commands_from(patch, on_disk)
     by_map = {}
     for level, command in hotfixes:
-        if level not in ("None", ""):
+        if kind(level) == "map":
             by_map.setdefault(level.lower(), []).append(command)
     _ec, extras_hotfixes, _ei = commands_from(extras, extras_sections)
     for level, command in extras_hotfixes:
-        if level not in ("None", ""):
+        if kind(level) == "map":
             by_map.setdefault(level.lower(), []).append(command)
     check(
         "the map-gated commands are spread over eighty maps once case is folded",
@@ -160,21 +284,21 @@ def main():
         f"{spellings}, folding to {len(by_map.get('backburner_p', []))} commands under one key",
     )
 
-    # --- claim 8: sections run whole, flags and all ---------------------------------------
-    # The audit's own assertion here is wrong. It says to count commands mentioning
-    # BodyDeath_Iris_Raid_PyroPete inside Fixes and expect 1; there are 4 of them, three of which
-    # the patch ships switched on. The real claim is about the ONE command in the default-on set
-    # that the patch authors flagged off, so that is what this counts.
+    # --- claim 8: a section the patch ships on runs as it ships ---------------------------
+    # Until ticket 49's review a ticked section ran whole, flags and all, which ran every option
+    # of each choose-one group, the last one winning: Pete's shipped "Explosion" lost to the
+    # "No Explosion" the patch ships off. Now not one line a shipped-on section flags off runs.
     shipped_commands, shipped_hotfixes, _si = commands_from(patch, None)
     shipped_on = set(shipped_commands) | {c for _lvl, c in shipped_hotfixes}
     default_commands, default_hotfixes, _di = commands_from(patch, defaults)
     default_all = set(default_commands) | {c for _lvl, c in default_hotfixes}
     extra_fired = sorted(default_all - shipped_on)
+    pete = [c for c in default_all if "BodyDeath_Iris_Raid_PyroPete" in c]
     check(
-        "ticking a section runs it whole, and that pulls in exactly one command the patch"
-        " authors had switched off",
-        len(extra_fired) == 1 and "BodyDeath_Iris_Raid_PyroPete" in extra_fired[0],
-        f"{len(extra_fired)} such commands: {[c[:90] for c in extra_fired]}",
+        "a ticked section runs as the patch ships it, so Pete's death explosion stays the shipped one",
+        not extra_fired and len(pete) == 3,
+        f"{len(extra_fired)} lines flagged off ran: {[c[:90] for c in extra_fired]}; "
+        f"{len(pete)} of Pete's 4 lines run",
     )
 
     # --- claim 9: the extras Lumi ticked are still names the code knows -------------------
@@ -221,7 +345,7 @@ def main():
     # command from an ignored one. _run now reads every line back, so the line says how many
     # landed, and landed + failed + not loaded is every command it ran.
     counted = [
-        re.search(r"(\d+) commands run, (\d+) failed,.*read back, (\d+) landed and (\d+) are not loaded", line)
+        re.search(r"(\d+) commands run, (\d+) failed; read back, (\d+) landed and (\d+) are not loaded", line)
         for line in applied
     ]
     check(
@@ -233,27 +357,23 @@ def main():
     )
 
     # --- claim 6, delivery, as far as the log can show it ---------------------------------
-    delivered = [line for line in log if "commands for " in line and "applied" in line]
-    named = [line.split("commands for ")[1].split(" applied")[0] for line in delivered]
-    unknown = [name for name in named if name not in by_map]
+    # The game applies a map's hotfixes when the map loads; the core reads them back on arrival.
+    arrived = [
+        re.search(r"arrived in (\S+); \d+ hotfixes in effect \(\d+ for every level, (\d+) for this map", line)
+        for line in log
+    ]
+    arrived = [m for m in arrived if m]
+    with_map = [m.group(1) for m in arrived if int(m.group(2)) > 0]
+    unknown = [name for name in with_map if name not in by_map]
     check(
-        "the log shows map-gated commands actually being applied on arrival somewhere",
-        bool(delivered),
-        f"{len(delivered)} arrivals logged: {sorted(set(named))}",
+        "the log shows a map's own hotfixes in effect on arrival somewhere",
+        bool(with_map),
+        f"{len(arrived)} arrivals logged, {len(with_map)} with the map's own lines: {sorted(set(with_map))}",
     )
     check(
-        "every map the log says it patched is one the patch really holds commands for",
+        "every map the log says had its own lines in effect is one the patch really names",
         not unknown,
-        f"maps with no held commands: {unknown}",
-    )
-
-    # --- the map-name diagnostic bug ------------------------------------------------------
-    # Expected to PASS while the bug is present: one line, and it reports on the menu map.
-    diagnostic = [line for line in log if "the game calls this map" in line]
-    check(
-        "the map-name diagnostic speaks once per launch and it speaks about the menu",
-        len(diagnostic) == 1 and "menumap" in diagnostic[0] and "has nothing for it" in diagnostic[0],
-        f"{len(diagnostic)} lines: {[d.split('INFO|')[-1].strip() for d in diagnostic]}",
+        f"maps the patch names nothing for: {unknown}",
     )
 
     # --- the undefended collision between the two patch files -----------------------------

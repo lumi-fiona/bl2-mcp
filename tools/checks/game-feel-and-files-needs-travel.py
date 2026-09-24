@@ -17,9 +17,9 @@
 #        bl2-mcp/tools/checks/game-feel-and-files-needs-travel.py
 #        same file again: it finds its own note and reports.
 #
-# Why it is worth the two trips: nothing re-applies these on a level load. core.py's
-# on_character_live re-runs the patch's hotfix commands and nothing else, and apply_all is
-# wired to the main menu (core.py:436-468) and to a character load (__init__.py:39). If the
+# Why it is worth the two trips: nothing re-applies these on a level load. The game's own
+# hotfix service re-applies the patch's hotfixes and nothing else, and apply_all is wired to
+# the main menu (core.on_main_menu) and to a character load (__init__.py:39). If the
 # console `set` only reached the player controller that was alive at the time, a fresh one
 # spawned by the next map would come back with the game's own defaults and the shake returns.
 

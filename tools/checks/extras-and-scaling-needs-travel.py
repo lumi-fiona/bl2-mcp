@@ -264,11 +264,11 @@ try:
         )
 
         # Extras claim 4.
+        _in_effect = {c for _w, c in core.in_effect(pc(), "ice_p")}
         check(
-            "the map watcher noticed this map, so the commands held for it were run",
-            core._map_done == "ice_p",
-            f"core._map_done = {core._map_done!r}, core._by_level carries "
-            f"{len(core._by_level.get('ice_p', []))} commands for ice_p",
+            "the text fixes for this map are among the hotfixes in effect on arriving here",
+            bool(ICE_COMMANDS) and all(c in _in_effect for c in ICE_COMMANDS),
+            f"{sum(1 for c in ICE_COMMANDS if c in _in_effect)} of {len(ICE_COMMANDS)} in effect",
         )
         verdicts = [_reads_back(command) for command in ICE_COMMANDS]
         check(

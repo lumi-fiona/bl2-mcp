@@ -225,17 +225,17 @@ def check_log():
         and "Second Wind:" in line
         and "Second Wind: probe applied" not in line
     ]
-    per_map = [
-        re.search(r"Second Wind: (\d+) commands for (\S+) applied, (\d+) failed", line)
+    # One line per map arrival since ticket 52: the hotfixes in effect there, read back.
+    arrivals = [
+        re.search(
+            r"Second Wind: arrived in (\S+); (\d+) hotfixes in effect \((\d+) for every level, "
+            r"(\d+) for this map, (\d+) for loaded packages\), read back: (\d+) landed, "
+            r"(\d+) failed, (\d+) not loaded",
+            line,
+        )
         for line in lines
     ]
-    per_map = [m for m in per_map if m]
-    named = [line for line in lines if "the game calls this map" in line]
-    reapplied = [
-        re.search(r"re-applied (\d+) hotfix commands on level load, (\d+) failed", line)
-        for line in lines
-    ]
-    reapplied = [m for m in reapplied if m]
+    arrivals = [m for m in arrivals if m]
     watching = [line for line in lines if "bridge: watching" in line]
 
     check(
@@ -288,8 +288,10 @@ def check_log():
 
     numbers = [
         re.search(
-            r"Second Wind: (.+?) applied, (\d+) commands run, (\d+) failed, (\d+) of them "
-            r"repeating on each level load, (\d+) held for particular maps, (\d+) lines ignored",
+            r"Second Wind: (.+?) applied, (\d+) commands run, (\d+) failed; read back, (\d+) "
+            r"landed and (\d+) are not loaded yet\. (\d+) hotfixes for the game's hotfix "
+            r"service: (\d+) for every level load, (\d+) for particular maps, (\d+) for "
+            r"particular packages",
             line,
         )
         for line in applied
@@ -303,37 +305,33 @@ def check_log():
     # This used to claim "not one patch command was refused" - true only because nothing was
     # ever read back (ticket 49). Now every line is, so "failed" is a real count and the line's
     # own numbers must add up to the commands it ran.
-    read_back = [
-        re.search(r"read back, (\d+) landed and (\d+) are not loaded", line) for line in applied
-    ]
     check(
         "every patch line reads its commands back: failed + landed + not loaded is the commands run",
         bool(numbers)
-        and len(read_back) == len(numbers)
-        and all(
-            r is not None
-            and int(m.group(2)) == int(m.group(3)) + int(r.group(1)) + int(r.group(2))
-            for m, r in zip(numbers, read_back)
-        ),
+        and len(numbers) == len(applied)
+        and all(int(m.group(2)) == int(m.group(3)) + int(m.group(4)) + int(m.group(5)) for m in numbers),
         ", ".join(
-            f"{m.group(1)}: {m.group(2)} run = {m.group(3)} failed + "
-            f"{r.group(1) if r else '?'} landed + {r.group(2) if r else '?'} not loaded"
-            for m, r in zip(numbers, read_back)
-        ),
-    )
-    # The audit asks for "483 keys in _by_level (479 + 4)". Both halves are wrong: 483 counts
-    # commands, not maps, and the figure moves the moment a patch section is unticked - with the
-    # Community Patch switched off it is 4. So what is checked here is that the numbers add up
-    # inside each line; the in-game file compares them against what the core is still holding.
-    check(
-        "every patch line's own numbers add up: the commands kept for later are a subset of the ones it tried",
-        bool(numbers)
-        and all(int(m.group(4)) <= int(m.group(2)) + int(m.group(3)) for m in numbers),
-        ", ".join(
-            f"{m.group(1)}: {m.group(2)} run, {m.group(4)} of them repeating, "
-            f"{m.group(5)} held for particular maps"
+            f"{m.group(1)}: {m.group(2)} run = {m.group(3)} failed + {m.group(4)} landed + "
+            f"{m.group(5)} not loaded"
             for m in numbers
         ),
+    )
+    # The figures move the moment a patch section is unticked, so what is checked is that each
+    # line's own numbers add up; the in-game file compares them against what the core holds.
+    check(
+        "every patch line's hotfix count is its three kinds added up: every level, a map's, a package's",
+        bool(numbers)
+        and all(int(m.group(6)) == int(m.group(7)) + int(m.group(8)) + int(m.group(9)) for m in numbers),
+        ", ".join(
+            f"{m.group(1)}: {m.group(6)} = {m.group(7)} + {m.group(8)} + {m.group(9)}"
+            for m in numbers
+        ),
+    )
+    installed = [line for line in lines if "hotfixes are in the game's own hotfix service" in line]
+    check(
+        "the hotfixes were handed to the game's own hotfix service at the main menu",
+        bool(installed),
+        installed[0].split("INFO| ")[-1] if installed else "no such line - were there no hotfixes?",
     )
 
     # Claim 4 wanted the patch line compared against a FrontendGFxMovie line. There is no such
@@ -352,33 +350,27 @@ def check_log():
             f"{(last - patch_at).total_seconds():.1f}s before the ready line",
         )
 
+    # Needs a character in the world at least once this launch; the read-back is the game's own
+    # application of the hotfixes, checked on arrival.
     check(
-        "the hotfix commands were re-run on a level load",
-        bool(reapplied) and all(int(m.group(1)) > 0 for m in reapplied),
-        ", ".join(f"{m.group(1)} commands, {m.group(2)} failed" for m in reapplied[:3]),
-    )
-    # The audit files this as needing a character walked through a fast-travel station. The log
-    # from the last launch already has it: the map watcher fired on arrival at real maps.
-    check(
-        "map-specific commands ran when their map loaded, at least once, with a non-zero count",
-        bool(per_map) and any(int(m.group(1)) > 0 for m in per_map),
-        ", ".join(f"{m.group(1)} for {m.group(2)}" for m in per_map[:5])
-        or (
-            "no arrivals logged"
-            + (
-                f" - and {off} ran nothing this launch, so almost no map has commands waiting"
-                if off
-                else " - travel somewhere the patch names and re-read the log"
-            )
+        "every map arrival read the hotfixes in effect back, and their numbers add up",
+        bool(arrivals)
+        and all(
+            int(m.group(2)) == int(m.group(3)) + int(m.group(4)) + int(m.group(5))
+            == int(m.group(6)) + int(m.group(7)) + int(m.group(8))
+            for m in arrivals
         ),
+        ", ".join(f"{m.group(1)}: {m.group(6)} of {m.group(2)} landed, {m.group(7)} failed" for m in arrivals[:6])
+        or "no arrivals logged - load a character and re-read the log",
     )
-    # The one-shot bug, visible in the log: the diagnostic that exists to make a map-name
-    # mismatch loud is allowed to fire once per process, and the menu map is always first.
+    # One, not zero: on a New Game's first map one Community Patch line reads back unapplied -
+    # Init_PlayerSkillStatusEffectDamage, whose object comes in after the game has applied that
+    # level's hotfixes (measured 2026-09-24, ticket 52; a real player gets the same). A service
+    # that stopped taking the pack's entries would fail hundreds.
     check(
-        "the map-name report fired exactly once this launch, and it was about the main menu",
-        len(named) == 1 and "menumap" in named[0],
-        (named[0].split("INFO| ")[-1] if named else "it never fired at all")
-        + f"  ({len(per_map)} maps arrived at since)",
+        "the hotfixes the game applied landed after every arrival: no more than one failed on any",
+        bool(arrivals) and all(int(m.group(7)) <= 1 for m in arrivals),
+        ", ".join(f"{m.group(1)} {m.group(7)} failed" for m in arrivals[:8]) or "no arrivals logged",
     )
 
     # The _ready race: apply_all runs on every character load, and the bridge's apply deletes
