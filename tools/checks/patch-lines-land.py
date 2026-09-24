@@ -6,8 +6,10 @@
 #   - Plain lines run once, at the first main menu, through core._run - as BLCMM's exec does for
 #     a real player. A level load reloads some packages and undoes a few, which is what hotfixes
 #     are for, so the known list below is held to at the first menu of a launch and only
-#     reported after that. A line the engine cannot even read (ticket 54: malformed text, a
-#     property the object does not have) is the patch's own, listed but never a failure here.
+#     reported after that. The patch's own slips (ticket 54) are put right, or left out as the
+#     game leaves them, by data/patch-corrections.txt - so at the first menu no plain line may
+#     fail at all, except the one table a feature rewrites on purpose. A correction naming a line
+#     its file no longer has (a newer patch) fails here too.
 #   - Hotfixes are applied by the game itself - every level's on each level load, a map's when it
 #     loads, a package's when the game loads it on demand. So they are judged only in a map, and
 #     only the ones in effect there (core.in_effect): a line a later one overwrites is left out.
@@ -24,20 +26,6 @@ import unrealsdk
 from bl2_modern import core, patchfile, patchset
 from mods_base import get_pc
 
-# The Community Patch's own plain lines that the engine takes but that never read back as
-# written (ticket 54), measured at the first main menu on 2026-09-24: MaxParticles 0 held as 1,
-# a Description the game keeps as its own text, and two effect lists. Keyed (object, property).
-KNOWN_UNTAKEABLE = {
-    ("gd_weap_smg.barrel.smg_barrel_dahl_bane", "weaponattributeeffects"),
-    ("gd_shields.accessory.absorption_shield_skill_aequitas", "skilleffectdefinitions"),
-    ("gd_attributepresentation.health.attrpresent_healthactiveregenerationrate", "description"),
-    ("fx_fluidrendering_px.sph.gun_sph", "maxparticles"),
-    ("fx_fluidrendering_px.sph.largegoo", "maxparticles"),
-    ("fx_shared_fluids_px.fx_fluid_grass", "maxparticles"),
-    ("fx_shared_fluids_px.fx_fluid_heavysmoke_px", "maxparticles"),
-    ("fx_shared_fluids_px.fx_fluid_rock_px", "maxparticles"),
-    ("fx_shared_fluids_px.fx_fluid_spark_px", "maxparticles"),
-}
 # Written again by a feature after the patch: the difficulty feature keeps its own table there.
 REWRITTEN_BY_FEATURES = {("gd_playthrough3tuning.balance.balancemod_pt3", "balancemodifiers")}
 # A hotfix whose object comes in after the game has applied a New Game's first map's hotfixes, so
@@ -67,8 +55,10 @@ at_menu = here == "menumap"
 _log = core.Path(core.__file__).parents[2] / "Binaries" / "Win32" / "Plugins" / "unrealsdk.log"
 first_menu = at_menu and "Second Wind: arrived in " not in _log.read_text(encoding="utf-8", errors="replace")
 
-# Plain lines, in file order, from the files the pack runs.
+# Plain lines, in file order, from the files the pack runs - corrected as the core corrects them.
 plain = []
+stale = []
+corrected_lines = set()
 for feature in core.all_features():
     if feature.failed is not None or feature.patch_sections is None:
         continue
@@ -78,7 +68,12 @@ for feature in core.all_features():
     text = (core.Path(core.__file__).parent / "data" / feature.patch_file).read_text(
         encoding="utf-8", errors="replace",
     )
-    plain += patchfile.commands_from(text, wanted)[0]
+    fixes = core.Path(core.__file__).parent / "data" / patchfile.CORRECTIONS
+    table = fixes.read_text(encoding="utf-8") if fixes.exists() else ""
+    commands, _hot, _n, gone = patchfile.corrected(table, feature.patch_file, text, patchfile.commands_from(text, wanted)[0], [])
+    stale += gone
+    corrected_lines |= set(commands) - set(patchfile.commands_from(text, wanted)[0])
+    plain += commands
 later = collections.defaultdict(list)
 for i, cmd in enumerate(plain):
     later[key(cmd)[0]].append((i, key(cmd)[1]))
@@ -103,15 +98,26 @@ try:
     plain_failed = [(key(c), why, c) for v, why, c in judged_plain if v == patchset.FAILED]
     unreadable = [f for f in plain_failed if not f[1].startswith("the value read back")]
     mismatched = [f for f in plain_failed if f[1].startswith("the value read back")]
-    unknown = [(k, why, c) for k, why, c in mismatched if k not in KNOWN_UNTAKEABLE | REWRITTEN_BY_FEATURES]
-    print(f"   {len(unreadable)} plain lines the engine cannot read at all, the patch's own (ticket 54): "
-          f"{[(why[:40], c[:60]) for _k, why, c in unreadable[:3]]}")
+    unknown = [(k, why, c) for k, why, c in mismatched if k not in REWRITTEN_BY_FEATURES]
+    check(
+        "every correction names a line its patch file still has",
+        not stale,
+        f"{len(stale)} stale: {[s[:90] for s in stale[:3]]}",
+    )
+    fixed = [(v, c) for v, _w, c in judged_plain if c in corrected_lines]
+    print(f"   corrected lines read back: {collections.Counter(v for v, _c in fixed)}")
     if first_menu:
         check(
-            "plain lines land through the console: the only ones reading back wrong are the patch's own known ones",
-            by[patchset.LANDED] > 1000 and not unknown,
-            f"{by[patchset.LANDED]} landed, {len(mismatched)} read back wrong, {len(unknown)} of them not on "
-            f"the known list: {[(why[:50], c[:90]) for _k, why, c in unknown[:4]]}",
+            "plain lines land through the console: none fails, bar the table a feature rewrites on purpose",
+            by[patchset.LANDED] > 1000 and not unknown and not unreadable,
+            f"{by[patchset.LANDED]} landed; {len(unreadable)} the engine cannot read: "
+            f"{[(why[:50], c[:90]) for _k, why, c in unreadable[:4]]}; {len(unknown)} read back wrong: "
+            f"{[c[:90] for _k, _w, c in unknown[:4]]}",
+        )
+        check(
+            "the corrected lines land",
+            len(fixed) >= 10 and all(v != patchset.FAILED for v, _c in fixed),
+            f"{[(v, c[:70]) for v, c in fixed if v == patchset.FAILED][:4]} of {len(fixed)}",
         )
     else:
         print(f"   after a level load: {len(mismatched)} plain lines read back wrong, {len(unknown)} of them not "

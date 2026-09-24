@@ -262,8 +262,10 @@ try:
     _on = len(ticked_sent) + len(ticked_hot)
     _off = len(fewer_sent) + len(fewer_hot)
     check(
-        "unticking Reskins removes exactly its 1119 lines from what gets run or handed over",
-        _on - _off == 1119,
+        # 1117: its 1119, less the 2 Seraph shield lines patch-corrections.txt leaves out as the
+        # game does (ticket 54).
+        "unticking Reskins removes exactly its 1117 lines from what gets run or handed over",
+        _on - _off == 1117,
         f"{_on} with it on, {_off} with it off",
     )
     _all_on = set(ticked_sent) | {c for _w, c in ticked_hot}
