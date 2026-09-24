@@ -3,7 +3,9 @@
 # the chest's own claims)
 #
 # The chest's own open, its loot moment 1.35 s later and the lid closing need time to pass, so they
-# are not here: tickets 19 and 45 have them, measured with screenshots. Everything below uses items
+# are not here: tickets 19, 45 and 48 have them, measured live (ticket 48 also a pause, a
+# save-quit and Continue). Ticket 48's claims drive the loot moment and a save's hooks directly,
+# with the game's own functions refusing where a failure is forced. Everything below uses items
 # this file spawns, and puts back what it changes (money, eridium, the level-less list, the
 # backpack count, the switch). A result laid in the closed chest and taken out again leaves it as
 # it was: its detach event belongs to its Opened sequence (measured, ticket 45).
@@ -13,7 +15,8 @@ import copy
 import types
 
 import unrealsdk
-from unrealsdk.hooks import Type, add_hook, remove_hook
+from unrealsdk.hooks import Block, Type, add_hook, remove_hook
+from unrealsdk.unreal import WeakPointer
 
 from bl2_modern import core
 from bl2_modern.features import grinder as G
@@ -33,7 +36,14 @@ SNIPER = "GD_Weap_SniperRifles.A_Weapons.Sniper_Maliwan_2_Uncommon"
 
 made_uids = []
 ids_before = set(G._ids)
+names_before = dict(G._names)
+marks_before = (list(G.marked.value or []), dict(G.named.value or {}))
+outputs_at_start = list(G._outputs)
+real = {n: getattr(G, n) for n in ("_level", "_use_up", "_say", "_socket")}
 wallet_before = (pri.GetCurrencyOnHand(cur.CURRENCY_Credits), pri.GetCurrencyOnHand(cur.CURRENCY_Eridium))
+ADD = "WillowGame.WillowInventoryManager:AddBackpackInventory"
+REMOVE = "WillowGame.WillowInventoryManager:RemoveInventoryFromBackpack"
+PICKUP = "WillowGame.WillowPlayerController:PickupPickupable"
 
 
 def roll(balance, n=1, stage=None):
@@ -272,6 +282,27 @@ try:
           titles[False] == "Title_Barrel_Vladof_Rapid", f"{titles}")
     check("a perfected gun keeps its old name into the backpack", titles[True] == "Title__Pistol", f"{titles}")
 
+    # --- ticket 48: the job's clock, and the list of results at an arrival -----------------------
+    # Pausing stops the game but not a wall clock: a pause over 8 s while the lid rose dropped the
+    # job and the chest opened empty. Game time stops with the lid (measured live, ticket 48).
+    check("the chest's job runs on game time", G._now(p) == float(p.WorldInfo.TimeSeconds),
+          f"{G._now(p)} vs {float(p.WorldInfo.TimeSeconds)}")
+    G._job = {"kind": "levelless", "uid": 0, "chest": WeakPointer(None), "started": G._now(p) - 7.5}
+    for _ in range(60):
+        G.on_tick(p, None, None, None)
+    kept_at_7 = G._job is not None
+    if G._job is not None:
+        G._job["started"] = G._now(p) - 8.5
+    for _ in range(60):
+        G.on_tick(p, None, None, None)
+    check("a job that never reaches its loot moment is dropped after 8 s of game time, not before",
+          kept_at_7 and G._job is None, f"kept at 7.5 s {kept_at_7}, dropped at 8.5 s {G._job is None}")
+    G._job = None
+    G._outputs.append((WeakPointer(None), G._new_uid(p)))  # a result from a map that is gone
+    G._on_map(p)
+    check("an arrival starts the list of results lying in a chest empty", not G._outputs, f"{G._outputs}")
+    G._outputs[:] = outputs_at_start
+
     chests = G._chests()
     check("the Golden Chest is in this map (the chest's claims below need Sanctuary)", len(chests) == 1,
           f"{len(chests)} chests")
@@ -361,15 +392,219 @@ try:
             check("taken out again, the closed chest is exactly as it was, and holds nothing",
                   chest_now() == before and not G._holding(c), f"{before} -> {chest_now()}")
 
+        # --- ticket 48: a save's copy, a refusing backpack, an unread level, the switch -------------
+        if G._ready(c) and not G._holding(c):
+            step = G._behaviour(c, "SpawningLoot", lambda b: b.Class.Name == "Behavior_AttachItems")
+            said = []
+            G._say = said.append
+
+            def lay(gun):
+                """A result lying in the closed chest, as the loot moment leaves it."""
+                data = copy.copy(gun.DefinitionData)
+                data.UniqueId = G._new_uid(p)
+                made_uids.append(int(data.UniqueId))
+                laid_ = G._mount(p, c, data, int(gun.GetMark()), step)
+                if laid_ is not None:
+                    G._outputs.append((WeakPointer(laid_), int(data.UniqueId)))
+                return laid_, int(data.UniqueId)
+
+            def places(uid):
+                """(carried, lying in a pickup): the one gun must be in exactly one place. Carried
+                counts the hands too: the game's own pickup equips a gun when a slot is free."""
+                lying = sum(1 for pk in unrealsdk.find_all("WillowPickup")
+                            if not pk.bDeleteMe and pk.Inventory is not None and G._uid(pk.Inventory) == uid)
+                return sum(1 for i in G.carried(p) if G._uid(i) == uid), lying
+
+            def tracked(uid):
+                return any(u == uid for _q, u in G._outputs)
+
+            def staying(uid):
+                """Carried and not on its way out of the game (a lifespan removes it next tick)."""
+                return any(G._uid(i) == uid and float(i.LifeSpan) == 0.0 for i in G.carried(p))
+
+            def forced(*_a):
+                raise RuntimeError("forced by the check")
+
+            src_gun, = roll(JAKOBS)
+            laid, u = lay(src_gun)
+            G.on_save(p, None, None, None)
+            G._use_up = forced
+            try:
+                G.on_saved(p, None, None, None)
+            finally:
+                G._use_up = real["_use_up"]
+            check("a save's copy that raises on the way out stays as the one gun, and the chest's goes",
+                  laid is not None and places(u) == (1, 0) and staying(u) and not tracked(u) and not G._in_save,
+                  f"{places(u)}, staying {staying(u)}")
+
+            laid, u = lay(src_gun)
+            G.on_save(p, None, None, None)
+            add_hook(REMOVE, Type.PRE, "grinder-check", lambda *_a: Block)
+            try:
+                G.on_saved(p, None, None, None)
+            finally:
+                remove_hook(REMOVE, Type.PRE, "grinder-check")
+            check("a save's copy the backpack keeps stays as the one gun, and the chest's goes",
+                  laid is not None and places(u) == (1, 0) and staying(u) and not tracked(u),
+                  f"{places(u)}, staying {staying(u)}")
+
+            laid, u = lay(src_gun)
+            calls = {"n": 0}
+
+            def refuse_once(*_a):
+                calls["n"] += 1
+                return Block if calls["n"] == 1 else None
+
+            add_hook(ADD, Type.PRE, "grinder-check", refuse_once)
+            try:
+                G.on_save(p, None, None, None)
+            finally:
+                remove_hook(ADD, Type.PRE, "grinder-check")
+            copied = u in G._in_save
+            G.on_saved(p, None, None, None)
+            check("a copy the backpack refuses sends the gun itself into the backpack before the save",
+                  laid is not None and places(u) == (1, 0) and staying(u) and not copied,
+                  f"{places(u)}, AddBackpackInventory calls {calls['n']}")
+            G._outputs[:] = [e for e in G._outputs if e[1] != u]  # the tick would prune it: carried
+
+            laid, u = lay(src_gun)
+            said.clear()
+            add_hook(ADD, Type.PRE, "grinder-check", lambda *_a: Block)
+            add_hook(PICKUP, Type.PRE, "grinder-check", lambda *_a: Block)
+            try:
+                G.on_save(p, None, None, None)
+            finally:
+                remove_hook(ADD, Type.PRE, "grinder-check")
+                remove_hook(PICKUP, Type.PRE, "grinder-check")
+            stayed = (places(u), tracked(u), list(G._in_save), any("this save does not have it" in m for m in said))
+            G.on_save(p, None, None, None)
+            next_save = G._held(p, u) is not None
+            G.on_saved(p, None, None, None)
+            check("refused both ways, the gun stays in the chest, still tracked, it is said, and the next save has it",
+                  laid is not None and stayed == ((0, 1), True, [], True) and next_save and places(u) == (0, 1),
+                  f"{stayed}, next save {next_save}")
+            if laid is not None:
+                G._discard(p, laid)
+            G._outputs[:] = [e for e in G._outputs if e[1] != u]
+
+            # Another hook blocks the save: its copy must still come back out (POST_UNCONDITIONAL).
+            laid, u = lay(src_gun)
+            add_hook("WillowGame.WillowPlayerController:SaveGame", Type.PRE, "grinder-check", lambda *_a: Block)
+            try:
+                p.SaveGame()
+            finally:
+                remove_hook("WillowGame.WillowPlayerController:SaveGame", Type.PRE, "grinder-check")
+            check("a save another hook blocks still gives its copy back: the gun lies only in the chest",
+                  laid is not None and places(u) == (0, 1) and not G._in_save, f"{places(u)}, in save {G._in_save}")
+            if laid is not None:
+                G._discard(p, laid)
+            G._outputs[:] = [e for e in G._outputs if e[1] != u]
+
+            # A step raises while the gun is laid in: nothing it made may stay in the game.
+            data = copy.copy(src_gun.DefinitionData)
+            data.UniqueId = G._new_uid(p)
+            made_uids.append(int(data.UniqueId))
+            G._socket = forced
+            try:
+                try:
+                    none_back = G._mount(p, c, data, int(src_gun.GetMark()), step) is None
+                except Exception:  # noqa: BLE001 - raising out is itself the failure
+                    none_back = False
+            finally:
+                G._socket = real["_socket"]
+            left = [pk for pk in unrealsdk.find_all("WillowPickup")
+                    if not pk.bDeleteMe and pk.Inventory is not None and G._uid(pk.Inventory) == int(data.UniqueId)]
+            alive = [w for w in unrealsdk.find_all("WillowWeapon") if G._uid(w) == int(data.UniqueId)
+                     and not w.bDeleteMe and float(w.LifeSpan) == 0.0]
+            check("a step that raises while the gun is laid in leaves no pickup and no gun behind",
+                  none_back and not left and not alive and not G._holding(c),
+                  f"returned None {none_back}, pickups {len(left)}, guns staying {len(alive)}")
+
+            # _level reads 0 when it cannot read the level, and a grade of 0 or 1 is a level-1 gun.
+            lv_gun, = roll(JAKOBS)
+            pri.AddCurrencyOnHand(cur.CURRENCY_Eridium, 500)
+            said.clear()
+            before_lv = (pri.GetCurrencyOnHand(cur.CURRENCY_Eridium), sorted(G._uid(i) for i in G.carried(p)),
+                         list(G._outputs), sorted(G._ids))
+            G._level = lambda _pc: 0
+            try:
+                G._deliver(p, c, {"kind": "levelless", "uid": G._uid(lv_gun), "chest": WeakPointer(c)}, step)
+            finally:
+                G._level = real["_level"]
+            after_lv = (pri.GetCurrencyOnHand(cur.CURRENCY_Eridium), sorted(G._uid(i) for i in G.carried(p)),
+                        list(G._outputs), sorted(G._ids))
+            check("with the level unread, the loot moment refuses and takes nothing (no level-1 gun)",
+                  after_lv == before_lv and not G._holding(c) and any("could not read your level" in m for m in said),
+                  f"{said[-1:]}")
+
+            # Perfecting with a copy that is itself level-less: both old ids leave the list.
+            pair = None
+            for _ in range(4):
+                t_gun, c_gun = roll(MAL2, 2)
+                if G.part_choices(t_gun, c_gun):
+                    pair = (t_gun, c_gun)
+                    break
+            if pair is not None:
+                tu, cu = G._uid(pair[0]), G._uid(pair[1])
+                G._ids.update({tu, cu})
+                pri.AddCurrencyOnHand(cur.CURRENCY_Credits, 1000000)
+                n_out = len(G._outputs)
+                G._deliver(p, c, {"kind": "perfect", "uid": tu, "copy": cu,
+                                  "slot": G.part_choices(*pair)[0][0], "chest": WeakPointer(c)}, step)
+                new = G._outputs[-1][1] if len(G._outputs) > n_out else None
+                if new is not None:
+                    made_uids.append(new)
+            check("perfecting with a level-less copy leaves only the result's id in the list",
+                  pair is not None and new is not None and new in G._ids and tu not in G._ids and cu not in G._ids
+                  and places(new) == (0, 1) and G._held(p, tu) is None and G._held(p, cu) is None,
+                  f"pair {pair is not None}, result {new if pair else None}")
+            if pair is not None and new is not None:
+                result = G._outputs.pop()[0]()
+                if result is not None:
+                    G._discard(p, result)
+
+            # The switch goes off while the lid rises: no key was paid, so none of the chest's own loot.
+            ctx = types.SimpleNamespace(ContextObject=c)
+            G._job = {"kind": "levelless", "uid": 0, "chest": WeakPointer(c), "started": G._now(p)}
+            G.enabled.value = False
+            try:
+                off_job = G.on_chest_loot(step, ctx, None, None)
+                job_gone = G._job is None
+                off_none = G.on_chest_loot(step, ctx, None, None)
+            finally:
+                G._job = None
+                G.enabled.value = True
+            check("switched off on the way up, a chest the grinder opened still shows none of its own loot",
+                  off_job is Block and job_gone and not G._holding(c), f"{off_job}, job gone {job_gone}")
+            check("switched off with no grinder job, the chest's own loot step runs as the game's",
+                  off_none is None, f"{off_none}")
+            G._say = real["_say"]
+
 finally:
+    for name, fn in real.items():
+        setattr(G, name, fn)
+    for fn in (ADD, REMOVE, PICKUP, "WillowGame.WillowPlayerController:SaveGame"):
+        try:
+            remove_hook(fn, Type.PRE, "grinder-check")
+        except Exception:  # noqa: BLE001 - not hooked
+            pass
+    G._job = None
     G.enabled.value = True
     restore()
     G._ids.clear()
     G._ids.update(ids_before)
+    G._names.clear()
+    G._names.update(names_before)
+    G.marked.value, G.named.value = marks_before
+    G._outputs[:] = outputs_at_start
     for uid in made_uids:
         item = G._held(p, uid)
         if item is not None:
             manager.RemoveInventoryFromBackpack(item)
+            G._remove(item)
+    for item in equipped(p):  # a test gun the game's own pickup equipped
+        if G._uid(item) in made_uids:
+            manager.RemoveFromInventory(item)
             G._remove(item)
     manager.UpdateBackpackInventoryCount()
     pri.AddCurrencyOnHand(cur.CURRENCY_Credits, wallet_before[0] - pri.GetCurrencyOnHand(cur.CURRENCY_Credits))
