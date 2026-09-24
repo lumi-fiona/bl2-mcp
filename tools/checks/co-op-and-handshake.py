@@ -463,9 +463,11 @@ if info is not None:
     for prop, wanted, sentence in (
         ("bResurrectAllPlayersWhenOneDies", CF.shared_death.value,
          "one death sends both players to New-U follows the owner's option"),
-        ("bEnemiesForgetDownedPlayers", True, "enemies forget a downed player"),
-        ("bBossesRegenHealthOnReset", False, "bosses do not heal when the fight resets"),
-        ("bAdminCanPause", True, "the host is allowed to pause"),
+        ("bEnemiesForgetDownedPlayers", CF.forget_downed.value,
+         "enemies forgetting a downed player follows the owner's option"),
+        ("bBossesRegenHealthOnReset", not CF.bosses_stay_hurt.value,
+         "bosses healing when the fight resets follows the owner's option"),
+        ("bAdminCanPause", CF.admin_pause.value, "the host pausing follows the owner's option"),
     ):
         try:
             live_value = getattr(info, prop)

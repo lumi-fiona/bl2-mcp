@@ -81,6 +81,17 @@ def value_in(path, section, key):
     return None
 
 
+def saved_option(saved, name):
+    """An option's saved value, whether it sits at the top level or inside its group."""
+    options = saved.get("options", {})
+    if name in options:
+        return options[name]
+    for group in options.values():
+        if isinstance(group, dict) and name in group:
+            return group[name]
+    return None
+
+
 def key_of(line):
     stripped = line.strip()
     return stripped.partition("=")[0].strip().lower() if "=" in stripped else stripped
@@ -120,9 +131,13 @@ def main():
         f"backup reads {value_in(original, ENGINE_GAME_INFO, 'bAdminCanPause')!r}",
     )
 
+    saved = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    # Missing from the file means the option's default (both True in coopfixes.py).
+    stay_hurt = saved_option(saved, "Bosses stay hurt when you die")
+    forget = saved_option(saved, "Enemies forget you while you're down")
     for key, wanted, was in (
-        ("bBossesRegenHealthOnReset", "false", "true"),
-        ("bEnemiesForgetDownedPlayers", "true", "false"),
+        ("bBossesRegenHealthOnReset", "true" if stay_hurt is False else "false", "true"),
+        ("bEnemiesForgetDownedPlayers", "false" if forget is False else "true", "false"),
     ):
         check(
             f"{key} is {wanted} under [WillowGame.WillowGameInfo]",
@@ -168,8 +183,7 @@ def main():
 
     # --- the option and the file agree ------------------------------------------------------
 
-    saved = json.loads(SETTINGS.read_text(encoding="utf-8"))
-    option = saved.get("options", {}).get("One death sends both players to New-U")
+    option = saved_option(saved, "One death sends both players to New-U")
     check(
         "the saved settings carry the shared-death option at all",
         option is not None,
@@ -219,19 +233,18 @@ def main():
         "benemiesforgetdownedplayers",
     }
     changed_keys = {key_of(live_lines[i]) for i in differ}
-    # bResurrectAllPlayersWhenOneDies is driven by the shared_death option, not a fixed value
-    # like the other three - coopfixes.py always writes bAdminCanPause/bBossesRegenHealthOnReset/
-    # bEnemiesForgetDownedPlayers to the opposite of what the game ships, so those three can
-    # never coincide with the pre-pack copy. This one legitimately can, whenever the option is
-    # off: the pack still wrote it, just to the same value the game already shipped. Demanding a
-    # difference in that case would fail on Lumi's own choice, not on a stale backup - the
-    # check above already proves the backup itself is honest regardless.
-    must_differ = coop_keys - {"bresurrectallplayerswhenonedies"}
+    # Only bAdminCanPause is always written opposite to what the game ships. The other three
+    # follow their options and legitimately equal the pre-pack copy while an option is at vanilla;
+    # the backup checks above prove the backup itself is honest regardless.
+    must_differ = {"badmincanpause"}
     if option:
-        must_differ = must_differ | {"bresurrectallplayerswhenonedies"}
+        must_differ.add("bresurrectallplayerswhenonedies")
+    if stay_hurt is not False:
+        must_differ.add("bbossesregenhealthonreset")
+    if forget is not False:
+        must_differ.add("benemiesforgetdownedplayers")
     check(
-        "the co-op keys that must always differ from the pre-pack copy do "
-        "(bResurrectAllPlayersWhenOneDies only while the option is on)",
+        "the co-op keys whose option differs from vanilla differ from the pre-pack copy",
         must_differ <= changed_keys,
         f"missing: {sorted(must_differ - changed_keys)}; changed lines "
         f"{[i + 1 for i in differ]}",

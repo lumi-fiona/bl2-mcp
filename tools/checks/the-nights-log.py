@@ -177,7 +177,7 @@ try:
         ),
         N.on_damage.__wrapped__(victim, None, None, None),
         N.on_drop.__wrapped__(victim, None, None, None),
-        N.on_pickup.__wrapped__(killer, FakeStruct(Pickup=FakeStruct(Inventory=None)), None, None),
+        N.on_pickup.__wrapped__(killer, FakeStruct(CurrentPickupable=FakeStruct(Inventory=None)), None, None),
         N.on_down.__wrapped__(FakePawn("Lumi", killer), None, None, None),
         N.on_tick.__wrapped__(None, None, None, None),
         N.on_character_live.__wrapped__(None, None, None, None),
@@ -262,11 +262,11 @@ try:
     del N._pending[:]
     N.log_small_pickups.value = False
     N.on_pickup.__wrapped__(
-        killer, FakeStruct(Pickup=FakeStruct(Inventory=FakeItem("WillowUsableItem", "Bullets"))),
+        killer, FakeStruct(CurrentPickupable=FakeStruct(Inventory=FakeItem("WillowUsableItem", "Bullets"))),
         None, None,
     )
     N.on_pickup.__wrapped__(
-        killer, FakeStruct(Pickup=FakeStruct(Inventory=FakeItem("WillowWeapon", "Hornet"))),
+        killer, FakeStruct(CurrentPickupable=FakeStruct(Inventory=FakeItem("WillowWeapon", "Hornet"))),
         None, None,
     )
     picked = [e["what"] for e in N._pending if e["kind"] == "picked up"]
@@ -279,7 +279,7 @@ try:
     N.log_small_pickups.value = True
     del N._pending[:]
     N.on_pickup.__wrapped__(
-        killer, FakeStruct(Pickup=FakeStruct(Inventory=FakeItem("WillowUsableItem", "Bullets"))),
+        killer, FakeStruct(CurrentPickupable=FakeStruct(Inventory=FakeItem("WillowUsableItem", "Bullets"))),
         None, None,
     )
     check(
