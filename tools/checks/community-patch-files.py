@@ -22,7 +22,7 @@ LOG = GAME / "Binaries" / "Win32" / "Plugins" / "unrealsdk.log"
 
 sys.path.insert(0, str(MOD))
 
-from patchfile import PACKAGE, commands_from, section_of, sections_in  # noqa: E402
+from patchfile import PACKAGE, commands_from, pick_of, section_of, sections_in  # noqa: E402
 from patchsections import EXPECTED_COUNTS, EXTRAS, NOT_A_SWITCH, SECTIONS, all_names  # noqa: E402
 
 RESULTS = []
@@ -131,7 +131,8 @@ def skipped_by_blcmm(text, wanted):
     """
     Counted apart from commands_from, on purpose: the lines of the wanted sections that BLCMM
     would not run either - a line a shipped-on section ships off, and the second and later
-    options of a choose-one (MUT) group inside an opt-in extra (BLCMM ticks only the first).
+    options of a choose-one (MUT) group inside an opt-in extra (BLCMM ticks only the first;
+    "Calmer visual effects" runs its MILDEST pick instead, ticket 60).
     """
     category = re.compile(r'<category name="((?:[^"\\]|\\.)*)"([^>]*)>')
     lines = text.split("</BLCMM>", 1)[0].splitlines()
@@ -150,11 +151,13 @@ def skipped_by_blcmm(text, wanted):
         line = raw.strip()
         found = category.search(line)
         if found:
+            pick = pick_of(path)
             path.append(found.group(1))
             parent = stack[-1] if stack else None
             if parent and parent["mut"]:
                 parent["options"] += 1
-            out = bool(parent) and (parent["out"] or (parent["mut"] and parent["options"] > 1))
+            second = path[-1] != pick if pick else bool(parent) and parent["options"] > 1
+            out = bool(parent) and (parent["out"] or (parent["mut"] and second))
             stack.append({"mut": 'MUT="true"' in found.group(2), "options": 0, "out": out})
         if "</category>" in line and path:
             path.pop()
