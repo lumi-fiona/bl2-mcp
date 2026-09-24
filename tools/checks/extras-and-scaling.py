@@ -102,8 +102,12 @@ def _already_applied(obj, prop, want):
         got = float(obj.CostToResetSkillPoints.BaseValueScaleConstant)
         return abs(got - 1e-6) < 1e-9, f"scale {got!r}"
     if prop == "ValueFormula":
+        # The multiplier the line itself asks for. This was a flat 0.01 while cheaper dying was
+        # the only ValueFormula line; More Chests On Pandora (ticket 66) adds two more, 0.013 and
+        # 1.3, on the legendary and blue drop weights.
+        asked = float(re.search(r"Multiplier=" + _CONST, want).group(1))
         got = float(obj.ValueFormula.Multiplier.BaseValueConstant)
-        return abs(got - 0.01) < 1e-6, f"multiplier {got!r}"
+        return abs(got - asked) < 1e-6, f"multiplier {got!r}, asked {asked!r}"
     return None, "no comparison written for this property"
 
 

@@ -22,7 +22,7 @@ LOG = GAME / "Binaries" / "Win32" / "Plugins" / "unrealsdk.log"
 
 sys.path.insert(0, str(MOD))
 
-from patchfile import PACKAGE, commands_from, pick_of, section_of, sections_in  # noqa: E402
+from patchfile import CORRECTIONS, PACKAGE, commands_from, corrected, pick_of, section_of, sections_in  # noqa: E402
 from patchsections import EXPECTED_COUNTS, EXTRAS, NOT_A_SWITCH, SECTIONS, all_names  # noqa: E402
 
 RESULTS = []
@@ -53,10 +53,22 @@ DAMAGE_EMITTERS = {
 }
 HIDE_DAMAGE = "Hide Damage Numbers/Critical/Resist"
 
+# Collisions looked at and decided, so the check below only fails on a new one. Ticket 66:
+# More Chests On Pandora rewrites the whole loot list of the chests in Roland's armory; the
+# Community Patch's one line there fixes a pool inside entry [4], which that rewrite removes.
+# MCOP wins (extras register second), on purpose.
+DECIDED_COLLISIONS = {
+    ("gd_balance_treasure.chestgrades.objectgrade_dahlepic_bearerbadnews", "defaultloot"),
+}
 
-def targets(text, wanted):
-    """Every (object, property) pair a set of sections would write, lower-cased."""
+
+def targets(text, wanted, name):
+    """Every (object, property) pair a set of sections would write, lower-cased, after the
+    corrections the core applies to that file (patch-corrections.txt) - a line it leaves out
+    writes nothing."""
     commands, hotfixes, _ignored = commands_from(text, wanted)
+    fixes = (MOD / "data" / CORRECTIONS).read_text(encoding="utf-8")
+    commands, hotfixes, _changed, _stale = corrected(fixes, name, text, commands, hotfixes)
     pairs = set()
     for command in commands + [c for _lvl, c in hotfixes]:
         parts = command.split(None, 3)
@@ -380,7 +392,10 @@ def main():
     )
 
     # --- the undefended collision between the two patch files -----------------------------
-    collisions = sorted(targets(patch, every_section) & targets(extras, extras_sections))
+    collisions = sorted(
+        (targets(patch, every_section, "patch.txt") & targets(extras, extras_sections, "extras.txt"))
+        - DECIDED_COLLISIONS,
+    )
     check(
         "no object and property is written by both the Community Patch and the pack's extras",
         not collisions,
