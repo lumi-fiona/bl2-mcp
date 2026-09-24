@@ -158,7 +158,7 @@ if phase == 1:
     state["options"] = [
         (o, o.value)
         for o in (
-            bb.enabled, bb.include_badasses, bb.include_bosses, bb.follow_latest,
+            bb.enabled, bb.include_badasses, bb.include_bosses,
             td.enabled, td.where, td.smallest, td.show_target,
             lm.enabled, lm.floor, lm.ding, lm.most_at_once,
             gh.enabled, gh.show_kills, gh.show_place,
@@ -168,7 +168,6 @@ if phase == 1:
     bb.enabled.value = True
     bb.include_badasses.value = True
     bb.include_bosses.value = True
-    bb.follow_latest.value = False
 
     td.enabled.value = True
     td.where.value = td.TO_LOG
@@ -230,8 +229,8 @@ elif phase == 2:
     )
     check(
         "the bar is not stuck on an enemy that is already dead",
-        bb._tracked is None or bool(getattr(bb._tracked, "Health", 0)),
-        f"tracking {bb._tracked}",
+        bb._owner is None or bb._alive(bb._pawn()),
+        f"tracking {bb._pawn()}",
     )
 
     real_damage = [line for line in state["damage_lines"] if line.startswith("truedamage:")]
@@ -319,8 +318,8 @@ else:
     )
     check(
         "the health bar did not survive the map change",
-        bb._tracked is None,
-        f"tracking {bb._tracked}",
+        bb._owner is None or bb._pawn() is None,
+        f"tracking {bb._pawn()}",
     )
     restore()
     check(

@@ -46,14 +46,14 @@ COMMON_POOL = "GD_Itempools.WeaponPools.Pool_Weapons_All_01_Common"
 saved_options = [
     (o, o.value)
     for o in (
-        bb.enabled, bb.include_badasses, bb.include_bosses, bb.follow_latest,
+        bb.enabled, bb.include_badasses, bb.include_bosses,
         td.enabled, td.where, td.smallest, td.show_target,
         lm.enabled, lm.floor, lm.ding, lm.shape, lm.most_at_once,
         gh.enabled, gh.show_kills, gh.show_place, gh.remember,
     )
 ]
 saved_history = gh.history.value
-saved_tracked = bb._tracked
+saved_owner = bb._owner
 spawned = []
 made_markers = []
 
@@ -172,17 +172,22 @@ try:
         )
 
         # The bar itself. Showing and hiding are separate claims because they fail separately.
-        bb._tracked = None
+        bb._owner = None
         bb._show(pawn)
         check(
             "showing the bar keeps hold of the enemy it belongs to",
-            bb._tracked is pawn,
-            f"tracked {bb._tracked}",
+            bb._pawn() == pawn and bb._up,
+            f"owner {bb._pawn()}",
+        )
+        check(
+            "an enemy the game can read counts as alive (ticket 62: pawn.Health does not exist)",
+            bb._alive(pawn) == (not pawn.IsDead()),
+            f"alive={bb._alive(pawn)} dead={pawn.IsDead()}",
         )
         bb._hide()
         check(
             "hiding the bar forgets the enemy",
-            bb._tracked is None,
+            bb._owner is None and not bb._up,
             "",
         )
 
@@ -193,58 +198,46 @@ try:
     real_show = bb._show
     shown = []
     bb._deserves_a_bar = lambda _pawn: True
-    bb._show = lambda p: shown.append(p) or setattr(bb, "_tracked", p)
+    bb._show = lambda p: shown.append(p) or setattr(bb, "_owner", lambda: p) or setattr(bb, "_up", True)
     try:
         first, second = object(), object()
 
-        bb._tracked = None
+        bb._owner = None
         bb.enabled.value = True
-        bb.follow_latest.value = False
         bb.on_damage.__wrapped__(first, None, None, None)
         bb.on_damage.__wrapped__(second, None, None, None)
         check(
-            "with the bar left on the first enemy, hitting a second does not steal it",
-            bb._tracked is first,
+            "hitting a second named enemy moves the bar to it (ticket 62)",
+            bb._pawn() is second,
             f"{len(shown)} enemies were given the bar",
         )
 
-        bb._tracked = None
-        shown.clear()
-        bb.follow_latest.value = True
-        bb.on_damage.__wrapped__(first, None, None, None)
-        bb.on_damage.__wrapped__(second, None, None, None)
-        check(
-            "with the bar following what you hit, a second enemy takes it",
-            bb._tracked is second,
-            f"{len(shown)} enemies were given the bar",
-        )
-
-        bb._tracked = None
+        bb._owner = None
         shown.clear()
         bb.enabled.value = False
         bb.on_damage.__wrapped__(first, None, None, None)
         check(
             "switching the health bar off stops it appearing",
-            bb._tracked is None and not shown,
+            bb._owner is None and not shown,
             "",
         )
     finally:
         bb._deserves_a_bar = real_deserves
         bb._show = real_show
         bb.enabled.value = True
-        bb._tracked = None
+        bb._owner = None
 
     # The other half of the off switch: a bar already up must come down.
     hidden = []
     real_hide = bb._hide
-    bb._hide = lambda: hidden.append(1) or setattr(bb, "_tracked", None)
+    bb._hide = lambda: hidden.append(1) or setattr(bb, "_owner", None)
     try:
-        bb._tracked = object()
+        bb._owner = lambda: object()
         bb.enabled.value = False
         bb.on_tick.__wrapped__(P, None, None, None)
         check(
             "switching the health bar off takes down a bar that is already up",
-            bool(hidden) and bb._tracked is None,
+            bool(hidden) and bb._owner is None,
             "",
         )
 
@@ -252,7 +245,7 @@ try:
         hidden.clear()
         bb.enabled.value = True
         bb._ticks = 29
-        bb._tracked = object()  # unreadable: no bDeleteMe, no Health
+        bb._owner = lambda: None  # what a WeakPointer says once its enemy is destroyed
         bb.on_tick.__wrapped__(P, None, None, None)
         check(
             "an enemy that disappears without dying does not leave the bar on screen",
@@ -261,7 +254,7 @@ try:
         )
     finally:
         bb._hide = real_hide
-        bb._tracked = None
+        bb._owner = None
         bb.enabled.value = True
 
     # ---------------------------------------------------------------------------------
@@ -830,7 +823,7 @@ finally:
 
     gh.history.value = saved_history
     gh._card_item = None
-    bb._tracked = saved_tracked
+    bb._owner = saved_owner
     try:
         bb._hide()
     except Exception:
