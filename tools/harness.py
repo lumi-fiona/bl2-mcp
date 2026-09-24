@@ -67,6 +67,9 @@ class RecordedBox:
     def hide(self):
         pass
 
+    def is_showing(self):
+        return self.shown
+
     # conveniences, so checks read like sentences
     @property
     def title(self):
@@ -133,12 +136,14 @@ def restore():
 
 
 def pick(box, name):
-    """Choose a button, exactly as a person clicking it would."""
+    """Choose a button, exactly as a person clicking it would - the real box is gone before on_select."""
+    box.shown = False
     box.kw["on_select"](box, box.button(name))
 
 
 def cancel(box):
     """Back out, exactly as pressing escape would."""
+    box.shown = box.shown and bool(box.kw.get("prevent_cancelling"))  # one that cannot be backed out of stays up
     handler = box.kw.get("on_cancel")
     if handler:
         handler(box)

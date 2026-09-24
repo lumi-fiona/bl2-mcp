@@ -227,7 +227,8 @@ def _d_main():
     snap_slag_time = _d_slag_time(obj)
     snap_slag_state = D._slag_state()
     snap_memories = [(m, type(m)(m)) for m in (D._healing_original, D._dot_original, D._slag_time_original, D._table_original)]
-    snap_flags = {"_new_character": D._new_character, "PER_CHARACTER": D.PER_CHARACTER,
+    snap_flags = {"_answer_at_creation": D._answer_at_creation, "_creation_box": D._creation_box,
+                  "PER_CHARACTER": D.PER_CHARACTER,
                   "_class_slag_written": D._class_slag_written, "_preset_in_save": D._preset_in_save}
     snap_chosen_by = dict(D.chosen_by_character.value)
     # mode_chosen first: putting it back before the preset keeps the preset's own change
@@ -547,7 +548,7 @@ def _d_main():
         # --- claims 16 and 17: the mode picker -----------------------------------------
         boxes = record(D)
         D.preset.value = "UVHM"
-        D._ask(pc())
+        D._ask(lambda mode: D._choose(pc(), mode))
         check(
             "asking which mode opens exactly one box",
             len(boxes) == 1 and boxes[0].shown,
@@ -618,21 +619,118 @@ def _d_main():
             f"{len(boxes_btn)} boxes, cancellable={cancellable}, buttons {names}, chosen={D.mode_chosen.value}, "
             f"preset {D.preset.value!r}, applied {applied_btn}",
         )
-        D._new_character = True
-        D.on_main_menu(None, None, None, None)
+        # --- ticket 61: the box at class select's Confirm Character, never at spawn ------------
+        # Stand-ins for the class select screen and the hook's arguments, so no real screen is
+        # needed. The screen's ConfirmCharacter runs the hook again, as the game's own does, and
+        # keeps what the hook said to the confirm it let through.
+        class _DArgs:
+            def __init__(self, player):
+                self.PlayerIndex = player
+
+        class _DSelectScreen:
+            def __init__(self):
+                self.confirmed = []
+                self.hook_said = []
+
+            def ConfirmCharacter(self, player):
+                self.confirmed.append(player)
+                self.hook_said.append(D.on_confirm_character(self, _DArgs(player), None, None))
+
+        class _DNoDialog(RecordedBox):
+            def show(self, button=None):
+                raise RuntimeError("simulated: the game would not show a dialog")
+
+        real_weak, real_error = D.WeakPointer, D.logging.error
+        applied_c, switched_c, errors_c = [], [], []
+        D.WeakPointer = lambda o: (lambda: o)  # the stand-in is not a UObject
+        D._switch_to_uvhm = lambda _pc: switched_c.append(1) or True
+        D._apply = lambda chosen, quiet=False: applied_c.append((chosen, quiet))
+        D.logging.error = lambda msg, *_a, **_k: errors_c.append(msg)
+        try:
+            boxes_c = record(D)
+            screen = _DSelectScreen()
+            D._answer_at_creation, D._creation_box = None, None
+            D.ask_on_new.value = True
+            D.mode_chosen.value = False
+            D.preset.value = "Normal"
+            first = D.on_confirm_character(screen, _DArgs(0), None, None)
+            again = D.on_confirm_character(screen, _DArgs(0), None, None)  # Confirm pressed again under the box
+            opened = len(boxes_c)
+            box_c = boxes_c[0] if boxes_c else None
+            # The key that confirmed the character: its release reaches the box first.
+            keys_c = box_c.kw.get("on_input") if box_c is not None else None
+            _e = D.EInputEvent
+            key_rule = None if keys_c is None else [
+                keys_c(box_c, "Enter", _e.IE_Released), keys_c(box_c, "Enter", _e.IE_Repeat),
+                keys_c(box_c, "MouseX", _e.IE_Axis),
+                keys_c(box_c, "Enter", _e.IE_Pressed), keys_c(box_c, "Enter", _e.IE_Released)]
+            before_answer = (list(screen.confirmed), D.mode_chosen.value, D._answer_at_creation)
+            if box_c is not None:
+                pick(box_c, "Second Wind")
+            after_answer = (list(screen.confirmed), list(screen.hook_said), D._answer_at_creation, D.mode_chosen.value)
+            D.on_character_live(pc(), None, None, None)
+            at_spawn = (D._answer_at_creation, D.mode_chosen.value, D.preset.value, len(switched_c),
+                        [c for c, quiet in applied_c if not quiet], len(boxes_c))
+            D.on_character_live(pc(), None, None, None)  # the next spawn, a Continue: asked nothing
+            next_spawn = (D.mode_chosen.value, D.preset.value, len(boxes_c))
+
+            D.mode_chosen.value = False
+            D.ask_on_new.value = False
+            asking_off = D.on_confirm_character(_DSelectScreen(), _DArgs(0), None, None)
+            D.ask_on_new.value = True
+            second_player = D.on_confirm_character(_DSelectScreen(), _DArgs(1), None, None)
+            not_asked = len(boxes_c) - 1
+            D.OptionBox = _DNoDialog
+            failed_box = D.on_confirm_character(_DSelectScreen(), _DArgs(0), None, None)
+            D._answer_at_creation = "UVHM"
+            D.on_main_menu(None, None, None, None)
+            forgotten = D._answer_at_creation
+        finally:
+            restore()
+            D.WeakPointer, D.logging.error = real_weak, real_error
+            D._switch_to_uvhm = real_switch
+            D._apply = real_apply
+            D._answer_at_creation, D._creation_box = None, None
         check(
-            "going back to the main menu forgets that a new character was being made",
-            D._new_character is False,
-            f"_new_character={D._new_character}",
+            "Confirm Character on a new character is held for one box, which cannot be backed out of",
+            first is Block and again is Block and opened == 1
+            and box_c.kw.get("prevent_cancelling") is True and box_c.names() == ["Normal", "UVHM", "Second Wind"],
+            f"hook said {getattr(first, '__name__', first)} then {getattr(again, '__name__', again)}, "
+            f"{opened} boxes, no cancel={box_c.kw.get('prevent_cancelling') if box_c else None}",
         )
-        D._new_character = False
-        D.on_new_game(None, None, None, None)
         check(
-            "the game's new-game notification marks the next spawn as a new character",
-            D._new_character is True,
-            f"_new_character={D._new_character}",
+            "the box ignores the release of the key that confirmed the character, and takes a key pressed on it",
+            key_rule == [(Block, True), (Block, True), None, None, None],
+            f"release, repeat, mouse, press, release -> {key_rule}",
         )
-        D._new_character = False
+        check(
+            "the answer lets the game's own confirm through once and waits for the spawn",
+            before_answer == ([], False, None) and after_answer == ([0], [None], "Second Wind", False),
+            f"before: confirmed, chosen, waiting = {before_answer}; after: confirmed, hook said, waiting, "
+            f"chosen = {after_answer}",
+        )
+        check(
+            "the first spawn puts that answer on the character and into force, and opens no box",
+            at_spawn == (None, True, "Second Wind", 1, ["Second Wind"], 1),
+            f"waiting, chosen, preset, switches, applied, boxes = {at_spawn}",
+        )
+        check(
+            "the spawn after that asks nothing and changes nothing",
+            next_spawn == (True, "Second Wind", 1),
+            f"chosen, preset, boxes = {next_spawn}",
+        )
+        check(
+            "no box with asking off or for split screen's second player, and a box that cannot show lets the confirm go on",
+            asking_off is None and second_player is None and not_asked == 0 and failed_box is None
+            and any("could not show the mode picker" in e for e in errors_c),
+            f"asking off -> {asking_off!r}, second player -> {second_player!r}, extra boxes {not_asked}, "
+            f"no dialog -> {failed_box!r}, errors {errors_c}",
+        )
+        check(
+            "going back to the main menu forgets an answer still waiting for its character",
+            forgotten is None,
+            f"_answer_at_creation={forgotten!r}",
+        )
 
         # --- the discarded return value ------------------------------------------------
         # Both paths are driven with _switch_to_uvhm stubbed to fail, so no playthrough is
@@ -645,7 +743,7 @@ def _d_main():
 
         boxes2 = record(D)
         D.preset.value = "UVHM"
-        D._ask(pc())
+        D._ask(lambda mode: D._choose(pc(), mode))
         applied.clear()
         pick(boxes2[-1], "UVHM")
         loud = [c for c, quiet in applied if not quiet and c != D.NORMAL]
@@ -672,10 +770,41 @@ def _d_main():
             [t for _, t in D.on_character_live.hook_funcs] == [Type.POST],
             f"hook types {[t for _, t in D.on_character_live.hook_funcs]}",
         )
+        check(
+            "the class select hook runs before Confirm Character, so its Block can hold the confirm",
+            [t for _, t in D.on_confirm_character.hook_funcs] == [Type.PRE],
+            f"hook types {[t for _, t in D.on_confirm_character.hook_funcs]}",
+        )
+
+        # Ticket 61: a New Game's class loads after its spawn, so a scene's end writes the class lines again.
+        class _DSceneArgs:
+            def __init__(self, on):
+                self.bInCinematicMode = on
+
+        real_set_slag = D._set_slag
+        slag_calls = []
+        D._set_slag = lambda second_wind: slag_calls.append(second_wind)
+        try:
+            D.mode_chosen.value = True
+            D.preset.value = "Second Wind"
+            D._forget_mode()
+            D.on_scene_end(None, _DSceneArgs(True), None, None)   # a scene starting: nothing
+            D.on_scene_end(None, _DSceneArgs(False), None, None)  # a scene over: Second Wind's lines
+            D.mode_chosen.value = False
+            D._forget_mode()
+            D.on_scene_end(None, _DSceneArgs(False), None, None)  # never chose: the game's own
+        finally:
+            D._set_slag = real_set_slag
+            D._forget_mode()
+        check(
+            "the end of a scene writes the slag lines of the mode played, after the scene and not before",
+            [t for _, t in D.on_scene_end.hook_funcs] == [Type.POST] and slag_calls == [True, False],
+            f"hook types {[t for _, t in D.on_scene_end.hook_funcs]}, _set_slag calls {slag_calls}",
+        )
         switched = []
         D._switch_to_uvhm = lambda _pc: switched.append(1) or False
         D.mode_chosen.value = False
-        D._new_character = False
+        D._answer_at_creation = None
         D.preset.value = "UVHM"
         boxes_old = record(D)
         applied.clear()
@@ -699,27 +828,19 @@ def _d_main():
             def GetCurrentPlaythrough(self):
                 return 0
 
+        # Ticket 61: a spawn never asks now, whatever the game's new-game notification said - the box
+        # at spawn covered Claptrap's scene. The class select checks above are the only way in.
         boxes_zero = record(D)
-        D.on_character_live(_DFirstPlaythrough(), None, None, None)
-        asked_old = len(boxes_zero)
-        D._new_character = True
-        D.ask_on_new.value = False
-        D.on_character_live(_DFirstPlaythrough(), None, None, None)
-        asked_off = len(boxes_zero) - asked_old
-        D._new_character = True
-        D.ask_on_new.value = True
-        D.on_character_live(_DFirstPlaythrough(), None, None, None)
-        asked_new = len(boxes_zero) - asked_old - asked_off
-        D.on_character_live(_DFirstPlaythrough(), None, None, None)
-        asked_again = len(boxes_zero) - asked_old - asked_off - asked_new
+        for asking in (True, False):
+            D.ask_on_new.value = asking
+            D.on_character_live(_DFirstPlaythrough(), None, None, None)
+            D.on_character_live(_DFirstPlaythrough(), None, None, None)
         check(
-            "only a character just made with New Game gets the box, once, and none with asking off",
-            (asked_old, asked_off, asked_new, asked_again) == (0, 0, 1, 0) and not switched,
-            f"old playthrough-0 character {asked_old}, asking off {asked_off}, new {asked_new}, "
-            f"its next spawn {asked_again}; switch tried {len(switched)}",
+            "no spawn opens the box, asking on or off, for a playthrough-0 character that never chose",
+            not boxes_zero and not switched,
+            f"{len(boxes_zero)} boxes over four spawns; switch tried {len(switched)}",
         )
         D.ask_on_new.value = True
-        D._new_character = False
         applied.clear()
         D.preset.value = "Second Wind"
         check(
@@ -967,7 +1088,8 @@ def _d_main():
         D._apply = real_apply
         D._guid = real_guid
         D.PER_CHARACTER = snap_flags["PER_CHARACTER"]
-        D._new_character = snap_flags["_new_character"]
+        D._answer_at_creation = snap_flags["_answer_at_creation"]
+        D._creation_box = snap_flags["_creation_box"]
         D.chosen_by_character.value = snap_chosen_by
         D.chosen_by_character.save = real_save
         for memory, copy in snap_memories:
