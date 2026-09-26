@@ -142,9 +142,15 @@ def game_launch(load_character: bool = False, steal_focus: bool = False) -> str:
     subprocess.run(["taskkill", "/F", "/IM", "Borderlands2.exe"], capture_output=True, check=False)
     time.sleep(2)
     LOG.unlink(missing_ok=True)
+    # A heartbeat left by the last run would read as "bridge alive" before this one even starts.
+    HEARTBEAT.unlink(missing_ok=True)
     subprocess.Popen(
         [str(EXE), "-NoLauncher", "-nostartupmovies"],
         cwd=str(EXE.parent),
+        # stdin too: otherwise the game inherits this server's stdin pipe, and Python's startup in
+        # the game (a file query on stdin) blocks until this server's next read of it completes -
+        # the mods then only loaded when the next MCP call came in, minutes later (2026-09-26).
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
